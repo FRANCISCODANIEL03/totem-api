@@ -1,0 +1,12 @@
+.env
+credentials.json
+root-rock-426922-k0-6ac0c913409a.json
+test_*
+debug_*
+app/__pycache__/
+totem
+*.sqlite3
+
+*.DS_Store
+.vscode/
+.idea/

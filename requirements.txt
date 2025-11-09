@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+pydantic
+python-dotenv
+bcrypt==3.2.2
+passlib[bcrypt]
+pyjwt
+httpx
+authlib
+python-multipart
+email-validator
+boto3
+google-genai
+Pillow
