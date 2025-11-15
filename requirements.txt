@@ -9,6 +9,7 @@ bcrypt==3.2.2
 passlib[bcrypt]
 pyjwt
 httpx
+tabulate
 authlib
 python-multipart
 email-validator
