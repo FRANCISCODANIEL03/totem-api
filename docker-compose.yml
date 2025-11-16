@@ -1,28 +1,44 @@
 services:
   # ---------------------------------
-  # TU API (construida desde Dockerfile)
+  # SERVICIO 1: TU API
   # ---------------------------------
   mi-api:
-    build: .  # <-- ¡Construye usando el Dockerfile en este directorio!
+    build: .
     restart: always
     ports:
-      - "5005:5005" # <-- Mapea el puerto (host:container)
+      - "5005:5005" 
     env_file:
-      - .env  # <-- Carga las variables de .env
+      - .env
     environment:
-      # ¡¡LA PARTE MÁS IMPORTANTE!!
-      # Tu API usará esta URL INTERNA para hablar con Minio
-      - S3_ENDPOINT_URL=http://minio:9000
-      
-      # Pasa el puerto (aunque ya está en el CMD, esto es explícito)
-      - PORT=5005 
-      # ... (otras variables que necesite tu API)
+      - S3_ENDPOINT_URL=minio:9000
+      - PORT=5005
     depends_on:
-      - minio # Espera a que Minio inicie (parcialmente)
+      - minio 
     networks:
-      - mi-red
+      - totem-network
 
-# Define la red personalizada
+  # ---------------------------------
+  # SERVICIO 2: MINIO
+  # ---------------------------------
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: always
+    volumes:
+      - minio-data:/data
+    env_file:
+      - .env
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # Puerto S3 (para acceso PÚBLICO si lo necesitas)
+      - "9001:9001" # Puerto Consola Web
+    networks:
+      - totem-network
+
+# Define el volumen para que Minio guarde datos
+volumes:
+  minio-data:
+
+# Define la red que ambos usarán
 networks:
-  totemdb:
+  totem-network:
     driver: bridge
