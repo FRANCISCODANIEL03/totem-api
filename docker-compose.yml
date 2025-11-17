@@ -21,6 +21,8 @@ services:
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET}"
       GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
+
+      URL_PRODUCTION: "${URL_PRODUCTION}"
     depends_on:
       - minio 
     networks:
