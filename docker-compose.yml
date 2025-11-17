@@ -6,7 +6,8 @@ services:
     build: .
     restart: always
     ports:
-      - "5005:5005" 
+      - "5005:5005"
+    command: ["sh", "-c", "echo '--- VARIABLES DE ENTORNO DETECTADAS ---' && env && echo '--- FIN DE VARIABLES ---' && sleep 3600"]
     depends_on:
       - minio 
     networks:
