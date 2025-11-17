@@ -44,9 +44,9 @@ s3 = boto3.client(
     "s3",
     endpoint_url=endpoint_url,
     aws_access_key_id=S3_ACCESS_KEY,
-    aws_secret_key_id=S3_SECRET_KEY,
+    aws_secret_access_key=S3_SECRET_KEY,
     config=config,
-    verify=S3_USE_SSL # Usamos el booleano de la config
+    verify=S3_USE_SSL
 )
 
 # ==============================
