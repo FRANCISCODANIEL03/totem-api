@@ -160,6 +160,15 @@ def trigger_s3_cleanup(
     background_tasks.add_task(perform_s3_cleanup)
     return {"status": "success", "message": "S3 cleanup task initiated in background."}
 
+@router.post("/admin/internal-cleanup", status_code=202, include_in_schema=False)
+def trigger_internal_cleanup(background_tasks: BackgroundTasks):
+    """
+    Endpoint NO protegido, para ser llamado por el cron job de Dokploy.
+    Es seguro porque solo es accesible desde dentro del contenedor (localhost).
+    """
+    print(f"Internal cleanup task triggered by Cron Job.")
+    background_tasks.add_task(perform_s3_cleanup)
+    return {"status": "success", "message": "S3 internal cleanup task initiated."}
 
 @router.get("/image/{user_id}/{filename}")
 def get_template_image(user_id: str, filename: str):
