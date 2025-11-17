@@ -59,7 +59,10 @@ def refresh_token(payload: dict, db: Session = Depends(get_db)):
     data = decode_token(token)
     if not data or data.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    user = db.query(models.User).filter(models.User.id == int(data.get("sub"))).first()
+
+    user_id = str(data.get("sub"))
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     access = create_access_token({"sub": str(user.id), "email": user.email})
@@ -90,7 +93,13 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Unable to get email from Google")
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
-        user = models.User(email=email, full_name=full_name, is_google=True, hashed_password=None)
+        user = models.User(
+            id=str(uuid.uuid4()),
+            email=email,
+            full_name=full_name,
+            is_google=True,
+            hashed_password=None
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
