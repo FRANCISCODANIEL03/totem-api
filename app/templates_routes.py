@@ -2,12 +2,13 @@ import uuid
 from io import BytesIO
 from PIL import Image
 import boto3
+import botocore
 from botocore.config import Config as BotocoreConfig
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.utils import get_current_user, process_with_gemini
-from app.db import get_db
+from app.db import get_db, SessionLocal
 from app import models
 from app.config import (
     S3_BUCKET_NAME,
@@ -26,7 +27,11 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 # ============================================================
 
 protocol = "https" if S3_USE_SSL else "http"
-endpoint_url = f"{protocol}://{S3_ENDPOINT}"
+
+if S3_ENDPOINT.startswith("http"):
+    endpoint_url = S3_ENDPOINT
+else:
+    endpoint_url = f"{protocol}://{S3_ENDPOINT}"
 
 config = BotocoreConfig(
     region_name=S3_REGION,
@@ -35,28 +40,14 @@ config = BotocoreConfig(
     retries={"max_attempts": 3, "mode": "adaptive"},
 )
 
-# Intentamos con verificación SSL primero, y si falla, sin verificar
-try:
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
-        config=config,
-        verify=True
-    )
-    ssl_verify = True
-except Exception:
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
-        config=config,
-        verify=False
-    )
-    ssl_verify = False
-
+s3 = boto3.client(
+    "s3",
+    endpoint_url=endpoint_url,
+    aws_access_key_id=S3_ACCESS_KEY,
+    aws_secret_key_id=S3_SECRET_KEY,
+    config=config,
+    verify=S3_USE_SSL # Usamos el booleano de la config
+)
 
 # ==============================
 # 1️⃣ SUBIR TEMPLATE
@@ -70,7 +61,7 @@ async def upload_template(
 ):
     if file.content_type not in ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/heic"]:
         raise HTTPException(status_code=400, detail="Invalid image type")
-    
+
     contents = await file.read()
 
     # Generar UUID y clave S3
@@ -155,6 +146,19 @@ async def integrate_person(
 
     # Responder rápido
     return {"uuid": new_uid, "status": "processing"}
+
+@router.post("/admin/cleanup", status_code=202)
+def trigger_s3_cleanup(
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_current_user) # Protegido por login
+):
+    """
+    Inicia una tarea en segundo plano para verificar todos los objetos S3
+    y eliminar los registros de la BD que no tengan un archivo correspondiente.
+    """
+    print(f"Cleanup task triggered by user: {current_user.email}")
+    background_tasks.add_task(perform_s3_cleanup)
+    return {"status": "success", "message": "S3 cleanup task initiated in background."}
 
 
 @router.get("/image/{user_id}/{filename}")
@@ -273,3 +277,59 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
         print(f"✅ Uploaded integrated image to S3: {output_s3_key}")
     except Exception as e:
         print(f"❌ Error integrating image for key {output_s3_key}: {str(e)}")
+
+
+def perform_s3_cleanup():
+    """
+    Tarea en segundo plano para encontrar y eliminar registros huérfanos de la BD.
+    Crea su propia sesión de BD para ser segura en hilos.
+    """
+    db = SessionLocal()
+    try:
+        print("--- [S3 Cleanup Task Started] ---")
+
+        # 1. Obtener todos los registros de ambas tablas
+        all_templates = db.query(models.Template).all()
+        all_images = db.query(models.TemplateWithImage).all()
+        all_records = all_templates + all_images
+
+        print(f"Found {len(all_records)} total records to check in DB.")
+
+        deleted_count = 0
+
+        for record in all_records:
+            if not record.s3_key: # Seguridad por si algún registro tiene clave nula
+                continue
+
+            try:
+                # 2. Usar 'head_object' es la forma más rápida de verificar si existe
+                s3.head_object(Bucket=S3_BUCKET_NAME, Key=record.s3_key)
+
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    # 3. Si S3 da 404 (No Encontrado), el objeto no existe. Borrar de la BD.
+                    print(f"Orphaned record found (404): {record.s3_key}. Deleting from DB.")
+                    db.delete(record)
+                    deleted_count += 1
+                else:
+                    # Otro error de S3 (ej. 403 Forbidden)
+                    print(f"S3 error checking {record.s3_key}: {e}")
+            except Exception as e:
+                # Otro error inesperado
+                print(f"Unexpected error checking {record.s3_key}: {e}")
+
+        # 4. Hacer commit de todas las eliminaciones al final
+        if deleted_count > 0:
+            db.commit()
+            print(f"Committed {deleted_count} deletions from database.")
+        else:
+            print("No orphaned records found. DB is clean.")
+
+        print("--- [S3 Cleanup Task Finished] ---")
+
+    except Exception as e:
+        # Error general en la tarea
+        print(f"FATAL ERROR in cleanup task: {e}")
+        db.rollback() # Revertir cualquier cambio si la tarea falla a la mitad
+    finally:
+        db.close() # MUY importante cerrar la sesión de la base de datos
