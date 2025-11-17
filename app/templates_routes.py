@@ -15,7 +15,8 @@ from app.config import (
     S3_ACCESS_KEY,
     S3_SECRET_KEY,
     S3_ENDPOINT,
-    S3_USE_SSL
+    S3_USE_SSL,
+    URL_PRODUCTION
 )
 
 router = APIRouter(prefix="/templates", tags=["templates"])
@@ -94,7 +95,7 @@ def list_templates(db: Session = Depends(get_db), current_user=Depends(get_curre
     templates = db.query(models.Template).filter_by(user_id=current_user.id).all()
     result = []
     for t in templates:
-        proxy_url = f"http://localhost:8000/templates/image/{current_user.id}/{t.id}.png"
+        proxy_url = f"{URL_PRODUCTION}/templates/image/{current_user.id}/{t.id}.png"
         result.append({
             "uuid": t.id,
             "s3_key": t.s3_key,
@@ -107,7 +108,7 @@ def list_templates_with_images(db: Session = Depends(get_db), current_user=Depen
     images = db.query(models.TemplateWithImage).filter_by(user_id=current_user.id).all()
     result = []
     for img in images:
-        proxy_url = f"http://localhost:8000/templates/image/{current_user.id}/{img.id}.png"
+        proxy_url = f"{URL_PRODUCTION}/templates/image/{current_user.id}/{img.id}.png"
         result.append({
             "uuid": img.id,
             "url": proxy_url

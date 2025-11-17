@@ -23,3 +23,5 @@ S3_REGION = os.getenv("S3_REGION", "us-east-1")
 S3_USE_SSL = os.getenv("S3_USE_SSL", "true").lower() in ("true", "1", "t")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
+
+URL_PRODUCTION = os.getenv("URL_PRODUCTION", "http://localhost:5005")
