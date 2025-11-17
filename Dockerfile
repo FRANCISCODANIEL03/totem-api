@@ -10,6 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PORT 5005
 
+# Instalar curl para que los cron jobs de Dokploy (bash -c 'curl ...') funcionen.
+# Se debe ejecutar como root, antes de cambiar a 'USER app'.
+RUN apt-get update && apt-get install -y curl --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Etapa 2: Instalación de dependencias ---
 # Copia solo los archivos de requisitos primero
 COPY requirements.txt .
