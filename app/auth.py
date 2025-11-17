@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app import models, schemas
 from app.utils import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
-from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, FRONTEND_URL
+from urllib.parse import urlencode
 from authlib.integrations.starlette_client import OAuth, OAuthError
 import uuid
 import os
@@ -103,8 +104,16 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
         db.refresh(user)
+
     # generate tokens
     access = create_access_token({"sub": str(user.id), "email": user.email})
     refresh = create_refresh_token({"sub": str(user.id), "email": user.email})
-    # return tokens as JSON (or redirect to frontend with tokens as query params - be careful!)
-    return JSONResponse({"access_token": access, "refresh_token": refresh, "token_type": "bearer", "user": {"email": user.email, "full_name": user.full_name, "id": user.id}})
+
+    params = {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer"
+    }
+
+    redirect_url = f"{FRONTEND_URL}?{urlencode(params)}"
+    return RedirectResponse(redirect_url)

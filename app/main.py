@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from app import models
 from app.db import engine, Base
@@ -9,10 +10,30 @@ from app.utils import get_current_user
 from app.config import SECRET_KEY
 from tabulate import tabulate
 import uvicorn
+from app.limiter import limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Totem API", version="1.0.0")
+
+# --- CONFIGURACIÓN DEL RATE LIMITER ---
+# 1. Poner el limiter en el estado de la app
+app.state.limiter = limiter
+
+# 2. Añadir el manejador de excepciones
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    """
+    Responde con un 429 (Too Many Requests) cuando se excede el límite.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Límite de peticiones excedido: {exc.detail}"}
+    )
+
+app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(auth_router)
 app.include_router(templates_router)

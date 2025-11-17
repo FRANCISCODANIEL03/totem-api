@@ -24,8 +24,13 @@ services:
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
 
       URL_PRODUCTION: "${URL_PRODUCTION}"
+      FRONTEND_URL: "${FRONTEND_URL}"
+
+      REDIS_URL: "redis://redis:6379/0"
+      RATE_LIMIT_GLOBAL: "${RATE_LIMIT_GLOBAL:-6/minute}" # Mantenemos tu límite de 6/minute
     depends_on:
       - minio 
+      - redis
     networks:
       - totem-network
 
@@ -45,6 +50,15 @@ services:
     ports:
       - "9000:9000" # Puerto S3 (para acceso PÚBLICO si lo necesitas)
       - "9001:9001" # Puerto Consola Web
+    networks:
+      - totem-network
+  
+  # ---------------------------------
+  # SERVICIO 3: REDIS (para rate limiting y caché)
+  # ---------------------------------
+  redis:
+    image: "redis:7.0-alpine"
+    restart: always
     networks:
       - totem-network
 

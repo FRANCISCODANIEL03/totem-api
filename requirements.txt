@@ -18,3 +18,5 @@ google-genai
 psycopg2-binary
 Pillow
 itsdangerous
+slowapi
+redis

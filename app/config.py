@@ -25,3 +25,11 @@ S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
 
 URL_PRODUCTION = os.getenv("URL_PRODUCTION", "http://localhost:5005")
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+REDIS_URL = os.getenv("REDIS_URL")
+if not REDIS_URL:
+    raise ValueError("ERROR: La variable de entorno REDIS_URL no está configurada.")
+
+RATE_LIMIT_GLOBAL = os.getenv("RATE_LIMIT_GLOBAL", "6/minute")
