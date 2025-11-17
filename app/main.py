@@ -12,7 +12,7 @@ import uvicorn
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Auth API")
+app = FastAPI(title="Totem API", version="1.0.0")
 
 app.include_router(auth_router)
 app.include_router(templates_router)
