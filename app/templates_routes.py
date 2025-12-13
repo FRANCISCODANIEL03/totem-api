@@ -145,7 +145,7 @@ async def integrate_person(
     background_tasks.add_task(process_and_integrate_person, template.s3_key, contents, s3_key)
 
     # Responder rápido
-    return {"uuid": new_uid, "status": "processing"}
+    return {"uuid": new_uid, "status": "processing", "user_id": current_user.id}
 
 @router.post("/admin/cleanup", status_code=202)
 def trigger_s3_cleanup(
