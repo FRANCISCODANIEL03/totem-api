@@ -40,11 +40,6 @@ app.include_router(auth_router)
 app.include_router(templates_router)
 
 app.add_middleware(
-    limiter.middleware,
-    key_func=lambda request: request.client.host
-)
-
-app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Cambia esto a tus dominios permitidos
     allow_credentials=True,
