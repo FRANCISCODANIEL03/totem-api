@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from app import models
 from app.db import engine, Base
 from app.auth import router as auth_router
@@ -37,6 +38,20 @@ app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(auth_router)
 app.include_router(templates_router)
+
+app.add_middleware(
+    limiter.middleware,
+    key_func=lambda request: request.client.host
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Cambia esto a tus dominios permitidos
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
