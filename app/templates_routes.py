@@ -172,17 +172,34 @@ def trigger_internal_cleanup(background_tasks: BackgroundTasks):
 
 @router.get("/image/{user_id}/{filename}")
 def get_template_image(user_id: str, filename: str):
-    """Devuelve la imagen desde S3 a través del backend."""
+    """Devuelve la imagen desde S3 a través del backend con cabeceras CORS."""
     s3_key = f"{user_id}/{filename}"
 
     buffer = BytesIO()
     try:
         s3.download_fileobj(S3_BUCKET_NAME, s3_key, buffer)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Image not found: {str(e)}")
+        # Asegúrate de que las respuestas de error también tienen CORS si devuelven JSON
+        raise HTTPException(
+            status_code=404,
+            detail=f"Image not found: {str(e)}",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
 
     buffer.seek(0)
-    return StreamingResponse(buffer, media_type="image/png")
+
+    # --- AÑADIR CABECERAS CORS A LA RESPUESTA DE STREAMING ---
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET",
+        "Access-Control-Allow-Headers": "*"
+    }
+
+    return StreamingResponse(
+        buffer,
+        media_type="image/png",
+        headers=headers # Incluye las cabeceras en la respuesta
+    )
 
 
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
