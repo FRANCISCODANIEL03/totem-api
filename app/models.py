@@ -24,6 +24,9 @@ class Template(Base):
 
     user = relationship("User", back_populates="templates")
 
+    is_public = Column(Boolean, default=False, index=True)
+
+    user = relationship("User", back_populates="templates")
     # Relación con TemplateWithImage
     template_with_images = relationship("TemplateWithImage", back_populates="template")
 
