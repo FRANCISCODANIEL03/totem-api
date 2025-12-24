@@ -6,7 +6,9 @@ import botocore
 from botocore.config import Config as BotocoreConfig
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from app.utils import get_current_user, process_with_gemini
 from app.db import get_db, SessionLocal
 from app import models
@@ -19,6 +21,9 @@ from app.config import (
     S3_USE_SSL,
     URL_PRODUCTION
 )
+
+class PromptRequest(BaseModel):
+    prompt: str
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -106,6 +111,27 @@ def list_templates_with_images(db: Session = Depends(get_db), current_user=Depen
         })
     return result
 
+@router.get("/public")
+def list_public_templates(db: Session = Depends(get_db)):
+    """Devuelve todas las plantillas marcadas como públicas (Globales)"""
+    templates = db.query(models.Template).filter(models.Template.is_public == True).all()
+    
+    result = []
+    # Usamos un ID genérico o 'system' en la URL si el user_id es nulo
+    for t in templates:
+        # Si el template no tiene usuario (es del sistema), ajustamos la ruta
+        folder = t.user_id if t.user_id else "system"
+        
+        proxy_url = f"{URL_PRODUCTION}/templates/image/{folder}/{t.id}.png"
+        
+        result.append({
+            "uuid": t.id,
+            "s3_key": t.s3_key,
+            "url": proxy_url,
+            "is_public": True
+        })
+    return result
+
 
 # ==============================
 # 3️⃣ INTEGRAR PERSONA EN TEMPLATE
@@ -119,10 +145,22 @@ async def integrate_person(
     current_user=Depends(get_current_user)
 ):
     # Verificar que la plantilla exista
-    template = db.query(models.Template).filter_by(id=template_id, user_id=current_user.id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+    # template = db.query(models.Template).filter_by(id=template_id, user_id=current_user.id).first()
+    # if not template:
+    #     raise HTTPException(status_code=404, detail="Template not found")
 
+    # Buscar el template si pertenece al usuario O si es público
+    template = db.query(models.Template).filter(
+        models.Template.id == template_id,
+        or_(
+            models.Template.user_id == current_user.id,
+            models.Template.is_public == True
+        )
+    ).first()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found or access denied")
+    
     # Generar nuevo UUID para la imagen resultante
     new_uid = str(uuid.uuid4())
     s3_key = f"{current_user.id}/{new_uid}.png"
@@ -147,6 +185,33 @@ async def integrate_person(
     # Responder rápido
     return {"uuid": new_uid, "status": "processing", "user_id": current_user.id}
 
+@router.post("/admin/generate-public-template")
+async def generate_public_template(
+    request: PromptRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user) 
+    # Idealmente, aquí verificarías si current_user es admin
+):
+    uid = str(uuid.uuid4())
+    # Guardamos en una carpeta "system" o en la del admin, pero marcamos como público
+    s3_key = f"system/{uid}.png" 
+
+    # Crear registro en BD como PÚBLICO
+    template = models.Template(
+        id=uid, 
+        user_id=None, # O usa current_user.id si prefieres que tenga dueño
+        s3_key=s3_key, 
+        is_public=True 
+    )
+    db.add(template)
+    db.commit()
+
+    # Llamamos a una tarea para generar la imagen con Gemini
+    background_tasks.add_task(generate_and_upload_base_frame, request.prompt, s3_key)
+
+    return {"uuid": uid, "status": "generating_public_template"}
+
 @router.post("/admin/cleanup", status_code=202)
 def trigger_s3_cleanup(
     background_tasks: BackgroundTasks,
@@ -170,10 +235,10 @@ def trigger_internal_cleanup(background_tasks: BackgroundTasks):
     background_tasks.add_task(perform_s3_cleanup)
     return {"status": "success", "message": "S3 internal cleanup task initiated."}
 
-@router.get("/image/{user_id}/{filename}")
-def get_template_image(user_id: str, filename: str):
+@router.get("/image/{folder}/{filename}")
+def get_template_image(folder: str, filename: str):
     """Devuelve la imagen desde S3 a través del backend con cabeceras CORS."""
-    s3_key = f"{user_id}/{filename}"
+    s3_key = f"{folder}/{filename}"
 
     buffer = BytesIO()
     try:
@@ -201,36 +266,37 @@ def get_template_image(user_id: str, filename: str):
         headers=headers # Incluye las cabeceras en la respuesta
     )
 
-
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
-    """Esta función se ejecuta en segundo plano y procesa la imagen con Gemini y la sube a S3."""
-    img = Image.open(BytesIO(contents))
-
-    prompt = """
-    Add one or more human silhouettes next to the person in the provided image.
-
-    The silhouettes must maintain the same scale, body proportions, and relative size as the original person — not smaller, larger, thinner, or wider.
-
-    Ensure the silhouettes blend naturally into the scene, matching the lighting, perspective, and visual style of the original image.
-
-    The silhouettes should be clearly human-shaped but without detailed facial features (they can be semi-transparent or shaded).
-
-    Do not modify the original person or background, only add the silhouettes or masks beside them.
-
-    Add realistic human silhouettes next to the original person, keeping perfect scale consistency (1:1 ratio with the person height). 
-    Preserve proportions and spatial coherence. Match lighting and shadow direction. 
-    No distortion or unrealistic body dimensions. Mask style: smooth edges, neutral shadow tone. 
-    Background untouched."""
-
-    # Procesar con Gemini
-    result_img = process_with_gemini(prompt, img)
-
-    # Subir a S3
-    buffer = BytesIO()
-    result_img.save(buffer, format="PNG")
-    buffer.seek(0)
-
+    """
+    Toma una imagen de referencia (tema) y genera un MARCO/PLANTILLA basado en ella.
+    Subir el resultado a S3.
+    """
     try:
+        img = Image.open(BytesIO(contents))
+
+        # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
+        prompt = """
+        Analyze the provided image to understand its theme, style, color palette, and visual elements.
+        Based on this analysis, generate a photo frame or border template.
+
+        Strict Requirements:
+        1. **Layout**: Create a decorative frame that occupies the outer edges of the image.
+        2. **Center**: The center area must be a large, clean, empty WHITE space (rectangular or square) intended for a user to insert their own photo later.
+        3. **Style Integration**: Use the motifs, textures, and objects from the input image to design the frame (e.g., if the input is floral, make a floral border; if it's neon, make a neon border).
+        4. **No Obstructions**: Do NOT generate any people, faces, or text inside the central empty space.
+        5. **Full Bleed**: The frame should extend to the very edges of the canvas without external padding.
+        
+        Output ONLY the frame with the empty center.
+        """
+
+        # Procesar con Gemini (Imagen + Prompt)
+        result_img = process_with_gemini(prompt, img)
+
+        # Subir a S3
+        buffer = BytesIO()
+        result_img.save(buffer, format="PNG")
+        buffer.seek(0)
+
         s3.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=s3_key,
@@ -238,60 +304,55 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
             ContentType="image/png",
             ACL="public-read"
         )
-    except Exception as e:
-        print(f"Error uploading to S3 in background task: {str(e)}")
+        print(f"✅ Template generated from theme and uploaded to: {s3_key}")
 
+    except Exception as e:
+        print(f"❌ Error generating template in background task: {str(e)}")
+        
 def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
-    """Se ejecuta en segundo plano para integrar una persona en la plantilla."""
+    """
+    Se ejecuta en segundo plano. 
+    Toma una 'Plantilla/Marco' y una 'Foto de Persona', e inserta la persona dentro del marco.
+    """
     try:
-        # Descargar la imagen base desde S3
+        # 1. Descargar el MARCO (Template) desde S3
         base_buffer = BytesIO()
         s3.download_fileobj(S3_BUCKET_NAME, template_s3_key, base_buffer)
         base_buffer.seek(0)
-        base_img = Image.open(base_buffer)
+        base_img = Image.open(base_buffer).convert("RGB") # Asegurar formato consistente
 
-        # Cargar la nueva persona
-        person_img = Image.open(BytesIO(person_bytes))
+        # 2. Cargar la FOTO DEL USUARIO
+        person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
 
+        # 3. Prompt de Composición (Frame + Photo)
         prompt = """
-        Integrate the provided person photo into the image, placing them exactly where the silhouettes are located.
-        Maintain perfect scale consistency and realistic proportional relation between all people — the added person must have the same relative height, body proportions, and perspective as the person in the original image.
+        You are an expert photo compositor. Your task is to insert the provided user photo into the decorative frame.
 
-        The inserted person should look completely human, with realistic anatomy, natural body shape, and true-to-life lighting and shadows.
-        Preserve the original person’s size and position; do not alter or stylize them.
+        Inputs:
+        - Image 1: A decorative frame/border with a large empty or white central area.
+        - Image 2: A photo of a person or people.
+
+        Instructions:
+        1. **Identify the Void**: Locate the central empty/white space in the decorative frame.
+        2. **Insert & Scale**: Place the person/subjects from Image 2 into that central space. Resize the person so they fill the frame's opening naturally, ensuring their faces are clearly visible and centered.
+        3. **Preserve the Frame**: Do NOT modify, distort, or obscure the decorative border elements. The frame must remain exactly as it is in the original image.
+        4. **Harmonize**: Adjust the lighting, color temperature, and contrast of the inserted person to match the style and lighting of the frame (e.g., if the frame is soft/pastel, soften the photo slightly; if the frame is vibrant, keep the photo vibrant).
+        5. **Blending**: Ensure the edges where the photo meets the frame are clean. There should be no white gaps or awkward overlaps.
         
-        Match the environmental lighting, color tone, and depth of field of the base image.
-        
-        Do not apply cartoon, digital painting, anime, 3D render, or illustration styles — only realistic human appearance and photographic style.
+        Output:
+        A single final image containing the original decorative frame with the user's photo perfectly composited inside the center.
+        """
 
-        Technical constraints / control parameters:
-        Style: photorealistic, human, natural lighting
-        Scale ratio: 1:1 with base person (same physical height and proportions)
-
-        Perspective alignment: match camera angle and focal distance
-
-        No stylization or distortion (disable art filters, stylized weights = 0)
-        Keep background and base subject untouched
-
-        Inpainting strength: 0.3–0.45 (just enough to blend seamlessly without altering the scene)
-        Detail enhancement: medium realism focus, avoid over-sharpening
-
-        Seed locking recommended for consistent proportions
-
-        Negative prompt: 
-        cartoon, painting, anime, 3d render, illustration, 
-        unrealistic face, distorted body, thin limbs, exaggerated features, 
-        deformed hands, out of scale, blurry."""
-
-        # Procesar con Gemini
+        # 4. Procesar con Gemini (Enviamos ambas imágenes)
+        # Enviamos: [Prompt, Marco, Foto_Persona]
         result_img = process_with_gemini(prompt, base_img, other_image=person_img)
 
-        # Guardar en memoria
+        # 5. Guardar el resultado en memoria
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
 
-        # Subir a S3
+        # 6. Subir la imagen final a S3
         s3.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=output_s3_key,
@@ -300,10 +361,10 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
             ACL="public-read"
         )
 
-        print(f"✅ Uploaded integrated image to S3: {output_s3_key}")
-    except Exception as e:
-        print(f"❌ Error integrating image for key {output_s3_key}: {str(e)}")
+        print(f"✅ Uploaded integrated frame to S3: {output_s3_key}")
 
+    except Exception as e:
+        print(f"❌ Error integrating frame for key {output_s3_key}: {str(e)}")
 
 def perform_s3_cleanup():
     """
@@ -359,3 +420,30 @@ def perform_s3_cleanup():
         db.rollback() # Revertir cualquier cambio si la tarea falla a la mitad
     finally:
         db.close() # MUY importante cerrar la sesión de la base de datos
+
+def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
+    """Genera una imagen desde cero (text-to-image) usando Gemini y la sube a S3."""
+    try:
+        # Opción A: Crear lienzo blanco y pedirle a Gemini que dibuje sobre él (Inpainting/Editing)
+        base_canvas = Image.new('RGB', (1024, 1024), color='white')
+        
+        full_prompt = f"{prompt_text}. \n IMPORTANT: Output ONLY the frame image."
+        
+        # Reutilizamos la función existente
+        result_img = process_with_gemini(full_prompt, base_canvas)
+
+        buffer = BytesIO()
+        result_img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        s3.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=buffer,
+            ContentType="image/png",
+            ACL="public-read"
+        )
+        print(f"✅ Public template created: {s3_key}")
+
+    except Exception as e:
+        print(f"❌ Error generating public template: {str(e)}")
