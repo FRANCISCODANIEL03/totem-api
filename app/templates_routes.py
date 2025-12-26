@@ -1,6 +1,6 @@
 import uuid
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageOps
 import boto3
 import botocore
 from botocore.config import Config as BotocoreConfig
@@ -266,6 +266,20 @@ def get_template_image(folder: str, filename: str):
         headers=headers # Incluye las cabeceras en la respuesta
     )
 
+def fix_image_orientation(img: Image.Image) -> Image.Image:
+    """
+    Detecta si la imagen tiene metadatos EXIF de rotación
+    y aplica la rotación física a los píxeles para que se vea bien en web.
+    """
+    try:
+        # exif_transpose rota la imagen según su etiqueta de orientación
+        # y elimina la etiqueta para evitar doble rotación.
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        # Si la imagen no tiene EXIF o falla, la devolvemos tal cual
+        pass
+    return img
+
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     """
     Toma una imagen de referencia (tema) y genera un MARCO/PLANTILLA basado en ella.
@@ -273,6 +287,9 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     """
     try:
         img = Image.open(BytesIO(contents))
+
+        # 2. Corregir orientación
+        img = fix_image_orientation(img)
 
         # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
         prompt = """
@@ -321,8 +338,15 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
         base_buffer.seek(0)
         base_img = Image.open(base_buffer).convert("RGB") # Asegurar formato consistente
 
+        # [OPCIONAL] Corregir también la base 
+        base_img = fix_image_orientation(base_img)
+
         # 2. Cargar la FOTO DEL USUARIO
         person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
+
+        # [NUEVO] Corregir orientación de la foto de la persona
+        person_img = fix_image_orientation(person_img)
+
 
         # 3. Prompt de Composición (Frame + Photo)
         prompt = """
@@ -422,16 +446,44 @@ def perform_s3_cleanup():
         db.close() # MUY importante cerrar la sesión de la base de datos
 
 def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
-    """Genera una imagen desde cero (text-to-image) usando Gemini y la sube a S3."""
+    """Genera una imagen desde cero (text-to-image) usando Gemini y la sube a S3 con fondo transparente."""
     try:
-        # Opción A: Crear lienzo blanco y pedirle a Gemini que dibuje sobre él (Inpainting/Editing)
+        # 1. Crear lienzo blanco base
         base_canvas = Image.new('RGB', (1024, 1024), color='white')
         
-        full_prompt = f"{prompt_text}. \n IMPORTANT: Output ONLY the frame image."
+        # 2. Modificamos un poco el prompt para asegurar que el centro quede muy limpio
+        full_prompt = f"{prompt_text}. \n IMPORTANT: The center area must be EMPTY SOLID WHITE. The frame should be on the borders."
         
-        # Reutilizamos la función existente
+        # 3. Generar imagen con Gemini
         result_img = process_with_gemini(full_prompt, base_canvas)
 
+        # ==========================================
+        # 🪄 LÓGICA DE TRANSPARENCIA
+        # ==========================================
+        # Convertir a formato RGBA (Red, Green, Blue, Alpha/Transparencia)
+        result_img = result_img.convert("RGBA")
+        datas = result_img.getdata()
+        
+        new_data = []
+        # Definimos un umbral: 240 sobre 255. 
+        # Esto elimina el blanco puro y también los blancos con un poco de "ruido" o sombra suave.
+        threshold = 240 
+
+        for item in datas:
+            # item es una tupla (R, G, B, A)
+            # Si R, G y B son mayores que el umbral (es decir, es un color muy claro/blanco)
+            if item[0] > threshold and item[1] > threshold and item[2] > threshold:
+                # Lo reemplazamos por transparente total (0 en el cuarto valor)
+                new_data.append((255, 255, 255, 0))
+            else:
+                # Si no es blanco, dejamos el píxel original
+                new_data.append(item)
+        
+        # Aplicamos los nuevos datos a la imagen
+        result_img.putdata(new_data)
+        # ==========================================
+
+        # 4. Guardar como PNG (Importante: PNG es el único que soporta transparencia)
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -443,7 +495,7 @@ def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
             ContentType="image/png",
             ACL="public-read"
         )
-        print(f"✅ Public template created: {s3_key}")
+        print(f"✅ Public transparent template created: {s3_key}")
 
     except Exception as e:
         print(f"❌ Error generating public template: {str(e)}")
