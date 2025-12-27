@@ -289,7 +289,7 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         img = Image.open(BytesIO(contents))
 
         # 2. Corregir orientación
-        img = fix_image_orientation(img)
+        # img = fix_image_orientation(img)
 
         # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
         prompt = """
@@ -339,13 +339,15 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
         base_img = Image.open(base_buffer).convert("RGB") # Asegurar formato consistente
 
         # [OPCIONAL] Corregir también la base 
-        base_img = fix_image_orientation(base_img)
+        # base_img = fix_image_orientation(base_img)
 
         # 2. Cargar la FOTO DEL USUARIO
         person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
 
         # [NUEVO] Corregir orientación de la foto de la persona
-        person_img = fix_image_orientation(person_img)
+        # person_img = fix_image_orientation(person_img)
+
+        person_img = crop_to_4_5_portrait(person_img)
 
 
         # 3. Prompt de Composición (Frame + Photo)
@@ -446,44 +448,38 @@ def perform_s3_cleanup():
         db.close() # MUY importante cerrar la sesión de la base de datos
 
 def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
-    """Genera una imagen desde cero (text-to-image) usando Gemini y la sube a S3 con fondo transparente."""
+    """Genera una plantilla en formato RETRATO 4:5."""
     try:
-        # 1. Crear lienzo blanco base
-        base_canvas = Image.new('RGB', (1024, 1024), color='white')
+        # 1. CAMBIO CLAVE: Lienzo 4:5 (1080x1350)
+        base_canvas = Image.new('RGB', (1080, 1350), color='white')
         
-        # 2. Modificamos un poco el prompt para asegurar que el centro quede muy limpio
-        full_prompt = f"{prompt_text}. \n IMPORTANT: The center area must be EMPTY SOLID WHITE. The frame should be on the borders."
+        # 2. Prompt ajustado al nuevo ratio
+        full_prompt = f"""
+        {prompt_text}
         
-        # 3. Generar imagen con Gemini
+        CRITICAL FORMAT INSTRUCTIONS:
+        1. OUTPUT FORMAT: Standard Portrait aspect ratio 4:5.
+        2. LAYOUT: The decorative frame must extend to the EXTREME EDGES of the image.
+        3. NO MARGINS: Do NOT generate any white padding or borders outside the frame.
+        4. CENTER: The central area must be a large, empty SOLID WHITE rectangle meant for a photo insertion.
+        """
+        
+        # 3. Generar
         result_img = process_with_gemini(full_prompt, base_canvas)
 
-        # ==========================================
-        # 🪄 LÓGICA DE TRANSPARENCIA
-        # ==========================================
-        # Convertir a formato RGBA (Red, Green, Blue, Alpha/Transparencia)
+        # 4. Lógica de Transparencia 
         result_img = result_img.convert("RGBA")
         datas = result_img.getdata()
-        
         new_data = []
-        # Definimos un umbral: 240 sobre 255. 
-        # Esto elimina el blanco puro y también los blancos con un poco de "ruido" o sombra suave.
-        threshold = 240 
-
+        threshold = 230 
         for item in datas:
-            # item es una tupla (R, G, B, A)
-            # Si R, G y B son mayores que el umbral (es decir, es un color muy claro/blanco)
             if item[0] > threshold and item[1] > threshold and item[2] > threshold:
-                # Lo reemplazamos por transparente total (0 en el cuarto valor)
-                new_data.append((255, 255, 255, 0))
+                new_data.append((255, 255, 255, 0)) 
             else:
-                # Si no es blanco, dejamos el píxel original
                 new_data.append(item)
-        
-        # Aplicamos los nuevos datos a la imagen
         result_img.putdata(new_data)
-        # ==========================================
 
-        # 4. Guardar como PNG (Importante: PNG es el único que soporta transparencia)
+        # 5. Guardar
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -499,3 +495,27 @@ def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
 
     except Exception as e:
         print(f"❌ Error generating public template: {str(e)}")
+
+
+def crop_to_4_5_portrait(img: Image.Image) -> Image.Image:
+    """
+    Recorta la imagen al formato estándar de retrato 4:5 (1080x1350).
+    """
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+
+    # NUEVAS DIMENSIONES OBJETIVO (Ratio 4:5)
+    target_width = 1080
+    target_height = 1350
+
+    # ImageOps.fit redimensiona y recorta al centro para llenar estas dimensiones
+    img_cropped = ImageOps.fit(
+        img, 
+        (target_width, target_height), 
+        method=Image.Resampling.LANCZOS, 
+        centering=(0.5, 0.5)
+    )
+    
+    return img_cropped
