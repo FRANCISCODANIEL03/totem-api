@@ -495,19 +495,26 @@ def load_image_corrected(bytes_data: bytes) -> Image.Image:
 
 def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) -> Image.Image:
     frame = frame_img.convert("RGBA")
+    person = person_img.convert("RGBA")
 
     W, H = frame.size
 
-    # Ajustar la foto al canvas 4:5
-    person = ImageOps.fit(
-        person_img.convert("RGBA"),
-        (W, H),
-        method=Image.Resampling.LANCZOS,
-        centering=(0.5, 0.15)  # prioriza cabeza
-    )
+    # 🔑 ESCALAR SIN RECORTAR (contain)
+    scale = min(W / person.width, H / person.height)
+    new_w = int(person.width * scale)
+    new_h = int(person.height * scale)
 
-    final = Image.new("RGBA", (W, H))
-    final.paste(person, (0, 0))
-    final.paste(frame, (0, 0), frame)
+    person_resized = person.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    return final
+    # Fondo transparente
+    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+    # Centrar la foto completa
+    x = (W - new_w) // 2
+    y = (H - new_h) // 2
+
+    canvas.paste(person_resized, (x, y), person_resized)
+    canvas.paste(frame, (0, 0), frame)
+
+    return canvas
+
