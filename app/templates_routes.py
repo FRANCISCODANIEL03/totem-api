@@ -266,19 +266,6 @@ def get_template_image(folder: str, filename: str):
         headers=headers # Incluye las cabeceras en la respuesta
     )
 
-def fix_image_orientation(img: Image.Image) -> Image.Image:
-    """
-    Detecta si la imagen tiene metadatos EXIF de rotación
-    y aplica la rotación física a los píxeles para que se vea bien en web.
-    """
-    try:
-        # exif_transpose rota la imagen según su etiqueta de orientación
-        # y elimina la etiqueta para evitar doble rotación.
-        img = ImageOps.exif_transpose(img)
-    except Exception:
-        # Si la imagen no tiene EXIF o falla, la devolvemos tal cual
-        pass
-    return img
 
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     """
@@ -289,7 +276,6 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         img = Image.open(BytesIO(contents))
 
         # 2. Corregir orientación
-        # img = fix_image_orientation(img)
 
         # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
         prompt = """
@@ -338,14 +324,8 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
         base_buffer.seek(0)
         base_img = Image.open(base_buffer).convert("RGB") # Asegurar formato consistente
 
-        # [OPCIONAL] Corregir también la base 
-        # base_img = fix_image_orientation(base_img)
-
         # 2. Cargar la FOTO DEL USUARIO
         person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
-
-        # [NUEVO] Corregir orientación de la foto de la persona
-        # person_img = fix_image_orientation(person_img)
 
         person_img = crop_to_4_5_portrait(person_img)
 
