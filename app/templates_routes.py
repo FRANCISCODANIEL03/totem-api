@@ -311,54 +311,57 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
 
     except Exception as e:
         print(f"❌ Error generating template in background task: {str(e)}")
-        
+     
+# ... imports ...
+
 def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
     """
-    Se ejecuta en segundo plano. 
-    Toma una 'Plantilla/Marco' y una 'Foto de Persona', e inserta la persona dentro del marco.
+    Integra la persona dejando que Gemini maneje la rotación y el recorte.
     """
     try:
-        # 1. Descargar el MARCO (Template) desde S3
+        # 1. Descargar el MARCO (Template)
         base_buffer = BytesIO()
         s3.download_fileobj(S3_BUCKET_NAME, template_s3_key, base_buffer)
         base_buffer.seek(0)
-        base_img = Image.open(base_buffer).convert("RGB") # Asegurar formato consistente
+        base_img = Image.open(base_buffer).convert("RGB")
 
         # 2. Cargar la FOTO DEL USUARIO
         person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
 
-        person_img = crop_to_4_5_portrait(person_img)
+        # --- CAMBIO IMPORTANTE: ---
+        # ELIMINAMOS 'crop_to_4_5_portrait(person_img)'.
+        # Enviamos la foto completa a Gemini para que él decida cómo encajarla.
+        # Solo redimensionamos si es gigante para no gastar ancho de banda extra.
+        if person_img.width > 1500 or person_img.height > 1500:
+            person_img.thumbnail((1500, 1500)) 
 
-
-        # 3. Prompt de Composición (Frame + Photo)
+        # 3. Prompt de Composición INTELIGENTE
         prompt = """
-        You are an expert photo compositor. Your task is to insert the provided user photo into the decorative frame.
+        You are an expert photo compositor. Your task is to insert the User Photo (Image 2) into the center of the Frame (Image 1).
 
-        Inputs:
-        - Image 1: A decorative frame/border with a large empty or white central area.
-        - Image 2: A photo of a person or people.
+        CRITICAL INSTRUCTION FOR ROTATION:
+        - Analyze the orientation of the person in the User Photo (Image 2).
+        - **If the person appears sideways or rotated 90 degrees, ROTATE the image upright immediately.**
+        - The person's head must be at the top and body vertical.
 
-        Instructions:
-        1. **Identify the Void**: Locate the central empty/white space in the decorative frame.
-        2. **Insert & Scale**: Place the person/subjects from Image 2 into that central space. Resize the person so they fill the frame's opening naturally, ensuring their faces are clearly visible and centered.
-        3. **Preserve the Frame**: Do NOT modify, distort, or obscure the decorative border elements. The frame must remain exactly as it is in the original image.
-        4. **Harmonize**: Adjust the lighting, color temperature, and contrast of the inserted person to match the style and lighting of the frame (e.g., if the frame is soft/pastel, soften the photo slightly; if the frame is vibrant, keep the photo vibrant).
-        5. **Blending**: Ensure the edges where the photo meets the frame are clean. There should be no white gaps or awkward overlaps.
+        COMPOSITION INSTRUCTIONS:
+        1. **Identify the Void**: Find the central empty/white space in the Frame.
+        2. **Insert & Fill**: Place the corrected/upright User Photo into that space.
+        3. **Scale**: Resize the User Photo to FILL the void completely. Do not leave empty margins. It is okay to crop the sides of the user photo to make it fit the vertical frame.
+        4. **Preserve Frame**: Do NOT distort or change the decorative border (Image 1).
+        5. **Blending**: Make it look like a natural photo print.
         
-        Output:
-        A single final image containing the original decorative frame with the user's photo perfectly composited inside the center.
+        Output: The final vertical image with the person upright inside the frame.
         """
 
-        # 4. Procesar con Gemini (Enviamos ambas imágenes)
-        # Enviamos: [Prompt, Marco, Foto_Persona]
+        # 4. Procesar con Gemini
         result_img = process_with_gemini(prompt, base_img, other_image=person_img)
 
-        # 5. Guardar el resultado en memoria
+        # 5. Guardar y Subir
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
 
-        # 6. Subir la imagen final a S3
         s3.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=output_s3_key,
@@ -366,11 +369,10 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
             ContentType="image/png",
             ACL="public-read"
         )
-
-        print(f"✅ Uploaded integrated frame to S3: {output_s3_key}")
+        print(f"✅ Uploaded integrated frame (AI handled rotation): {output_s3_key}")
 
     except Exception as e:
-        print(f"❌ Error integrating frame for key {output_s3_key}: {str(e)}")
+        print(f"❌ Error integrating frame: {str(e)}")
 
 def perform_s3_cleanup():
     """
