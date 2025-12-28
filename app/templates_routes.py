@@ -501,11 +501,7 @@ def crop_to_4_5_portrait(img: Image.Image) -> Image.Image:
     """
     Recorta la imagen al formato estándar de retrato 4:5 (1080x1350).
     """
-    try:
-        img = ImageOps.exif_transpose(img)
-    except Exception:
-        pass
-
+    
     # NUEVAS DIMENSIONES OBJETIVO (Ratio 4:5)
     target_width = 1080
     target_height = 1350
