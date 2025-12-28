@@ -273,27 +273,33 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     Subir el resultado a S3.
     """
     try:
-        img = Image.open(BytesIO(contents))
+        img = load_image_corrected(contents)
+
 
         # 2. Corregir orientación
 
         # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
         prompt = """
-        Analyze the provided image to understand its theme, style, color palette, and visual elements.
-        Based on this analysis, generate a photo frame or border template.
+        Create a PROFESSIONAL photo frame template.
 
-        Strict Requirements:
-        1. **Layout**: Create a decorative frame that occupies the outer edges of the image.
-        2. **Center**: The center area must be a large, clean, empty WHITE space (rectangular or square) intended for a user to insert their own photo later.
-        3. **Style Integration**: Use the motifs, textures, and objects from the input image to design the frame (e.g., if the input is floral, make a floral border; if it's neon, make a neon border).
-        4. **No Obstructions**: Do NOT generate any people, faces, or text inside the central empty space.
-        5. **Full Bleed**: The frame should extend to the very edges of the canvas without external padding.
-        
-        Output ONLY the frame with the empty center.
+        STRICT RULES:
+        1. The frame must be ONLY on the borders.
+        2. The CENTER MUST BE FULLY TRANSPARENT (alpha channel).
+        3. Do NOT place any color, texture, or object in the center.
+        4. No people, no text, no faces.
+        5. Output PNG with transparency.
+
         """
 
         # Procesar con Gemini (Imagen + Prompt)
         result_img = process_with_gemini(prompt, img)
+
+        if result_img.mode != "RGBA":
+            raise ValueError("Template must have transparency")
+
+        alpha = result_img.split()[-1]
+        if alpha.getextrema()[0] == 255:
+            raise ValueError("Template has no transparent area")
 
         # Subir a S3
         buffer = BytesIO()
@@ -312,52 +318,20 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     except Exception as e:
         print(f"❌ Error generating template in background task: {str(e)}")
      
-# ... imports ...
-
 def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
-    """
-    Integra la persona dejando que Gemini maneje la rotación y el recorte.
-    """
     try:
-        # 1. Descargar el MARCO (Template)
-        base_buffer = BytesIO()
-        s3.download_fileobj(S3_BUCKET_NAME, template_s3_key, base_buffer)
-        base_buffer.seek(0)
-        base_img = Image.open(base_buffer).convert("RGB")
+        # Descargar marco
+        frame_buffer = BytesIO()
+        s3.download_fileobj(S3_BUCKET_NAME, template_s3_key, frame_buffer)
+        frame_buffer.seek(0)
+        frame_img = Image.open(frame_buffer)
 
-        # 2. Cargar la FOTO DEL USUARIO
-        person_img = Image.open(BytesIO(person_bytes)).convert("RGB")
+        # Cargar foto corregida
+        person_img = load_image_corrected(person_bytes)
 
-        # --- CAMBIO IMPORTANTE: ---
-        # ELIMINAMOS 'crop_to_4_5_portrait(person_img)'.
-        # Enviamos la foto completa a Gemini para que él decida cómo encajarla.
-        # Solo redimensionamos si es gigante para no gastar ancho de banda extra.
-        if person_img.width > 1500 or person_img.height > 1500:
-            person_img.thumbnail((1500, 1500)) 
+        # Integrar correctamente (SIN IA)
+        result_img = integrate_photo_with_frame(frame_img, person_img)
 
-        # 3. Prompt de Composición INTELIGENTE
-        prompt = """
-        You are an expert photo compositor. Your task is to insert the User Photo (Image 2) into the center of the Frame (Image 1).
-
-        CRITICAL INSTRUCTION FOR ROTATION:
-        - Analyze the orientation of the person in the User Photo (Image 2).
-        - **If the person appears sideways or rotated 90 degrees, ROTATE the image upright immediately.**
-        - The person's head must be at the top and body vertical.
-
-        COMPOSITION INSTRUCTIONS:
-        1. **Identify the Void**: Find the central empty/white space in the Frame.
-        2. **Insert & Fill**: Place the corrected/upright User Photo into that space.
-        3. **Scale**: Resize the User Photo to FILL the void completely. Do not leave empty margins. It is okay to crop the sides of the user photo to make it fit the vertical frame.
-        4. **Preserve Frame**: Do NOT distort or change the decorative border (Image 1).
-        5. **Blending**: Make it look like a natural photo print.
-        
-        Output: The final vertical image with the person upright inside the frame.
-        """
-
-        # 4. Procesar con Gemini
-        result_img = process_with_gemini(prompt, base_img, other_image=person_img)
-
-        # 5. Guardar y Subir
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -369,7 +343,8 @@ def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, outp
             ContentType="image/png",
             ACL="public-read"
         )
-        print(f"✅ Uploaded integrated frame (AI handled rotation): {output_s3_key}")
+
+        print(f"✅ Integrated image uploaded: {output_s3_key}")
 
     except Exception as e:
         print(f"❌ Error integrating frame: {str(e)}")
@@ -439,11 +414,18 @@ def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
         full_prompt = f"""
         {prompt_text}
         
-        CRITICAL FORMAT INSTRUCTIONS:
-        1. OUTPUT FORMAT: Standard Portrait aspect ratio 4:5.
-        2. LAYOUT: The decorative frame must extend to the EXTREME EDGES of the image.
-        3. NO MARGINS: Do NOT generate any white padding or borders outside the frame.
-        4. CENTER: The central area must be a large, empty SOLID WHITE rectangle meant for a photo insertion.
+       Create a PROFESSIONAL photo frame template.
+
+        STRICT RULES:
+        1. Canvas size: 1080x1350 (portrait 4:5).
+        2. The decorative frame MUST be on the borders only.
+        3. The CENTER MUST BE FULLY TRANSPARENT (alpha channel).
+        4. Do NOT place any texture, color, or object in the center.    
+        5. The frame must look like a real printed photo frame.
+        6. No text, no people, no faces.
+
+        Output: PNG with transparency.
+
         """
         
         # 3. Generar
@@ -497,3 +479,27 @@ def crop_to_4_5_portrait(img: Image.Image) -> Image.Image:
     )
     
     return img_cropped
+
+def load_image_corrected(bytes_data: bytes) -> Image.Image:
+    img = Image.open(BytesIO(bytes_data))
+    img = ImageOps.exif_transpose(img)
+    return img.convert("RGB")
+
+def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) -> Image.Image:
+    frame = frame_img.convert("RGBA")
+
+    W, H = frame.size
+
+    # Ajustar la foto al canvas 4:5
+    person = ImageOps.fit(
+        person_img.convert("RGBA"),
+        (W, H),
+        method=Image.Resampling.LANCZOS,
+        centering=(0.5, 0.15)  # prioriza cabeza
+    )
+
+    final = Image.new("RGBA", (W, H))
+    final.paste(person, (0, 0))
+    final.paste(frame, (0, 0), frame)
+
+    return final
