@@ -284,22 +284,15 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
 
         STRICT RULES:
         1. The frame must be ONLY on the borders.
-        2. The CENTER MUST BE FULLY TRANSPARENT (alpha channel).
-        3. Do NOT place any color, texture, or object in the center.
+        2. The CENTER MUST BE PURE WHITE (#FFFFFF).
+        3. The white center must be a clean rectangle.
         4. No people, no text, no faces.
-        5. Output PNG with transparency.
-
+        5. Output a flat image.
         """
 
         # Procesar con Gemini (Imagen + Prompt)
         result_img = process_with_gemini(prompt, img)
-
-        if result_img.mode != "RGBA":
-            raise ValueError("Template must have transparency")
-
-        alpha = result_img.split()[-1]
-        if alpha.getextrema()[0] == 255:
-            raise ValueError("Template has no transparent area")
+        result_img = white_to_transparency(result_img)
 
         # Subir a S3
         buffer = BytesIO()
@@ -317,6 +310,21 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
 
     except Exception as e:
         print(f"❌ Error generating template in background task: {str(e)}")
+
+def white_to_transparency(img: Image.Image, threshold=240) -> Image.Image:
+    img = img.convert("RGBA")
+    datas = img.getdata()
+    new_data = []
+
+    for item in datas:
+        if item[0] > threshold and item[1] > threshold and item[2] > threshold:
+            new_data.append((255, 255, 255, 0))  # transparente
+        else:
+            new_data.append(item)
+
+    img.putdata(new_data)
+    return img
+
      
 def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
     try:
