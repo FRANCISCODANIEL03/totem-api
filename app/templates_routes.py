@@ -315,10 +315,10 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         )
 
 
-        result_img = white_to_transparency(result_img)
+        #result_img = white_to_transparency(result_img)
 
-        # 🔒 cerrar huecos internos
-        result_img = fill_internal_transparency(result_img)
+        #  cerrar huecos internos
+        #result_img = fill_internal_transparency(result_img)
 
         # limpiar bordes residuales
         result_img = trim_empty_margins(result_img)
@@ -330,7 +330,7 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         if result_img.width > result_img.height:
             raise ValueError("Generated template is horizontal, expected vertical")
 
-        # 🔒 Tamaño final exacto
+        #  Tamaño final exacto
         if result_img.size != (1080, 1350):
             result_img = result_img.resize(
                 (1080, 1350),
