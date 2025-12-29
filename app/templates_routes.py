@@ -266,33 +266,56 @@ def get_template_image(folder: str, filename: str):
         headers=headers # Incluye las cabeceras en la respuesta
     )
 
-
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
-    """
-    Toma una imagen de referencia (tema) y genera un MARCO/PLANTILLA basado en ella.
-    Subir el resultado a S3.
-    """
     try:
+        # Imagen de referencia
         img = load_image_corrected(contents)
 
+        # 🔑 Canvas vertical fijo 4:5
+        BASE_WIDTH = 1080
+        BASE_HEIGHT = 1350
 
-        # 2. Corregir orientación
+        base_canvas = Image.new(
+            "RGB",
+            (BASE_WIDTH, BASE_HEIGHT),
+            color="white"
+        )
 
-        # 🔄 NUEVO PROMPT: De "Tema" a "Plantilla/Marco"
         prompt = """
-        Create a PROFESSIONAL photo frame template.
+        Create a PROFESSIONAL PHOTO FRAME TEMPLATE.
 
         STRICT RULES:
-        1. The frame must be ONLY on the borders.
-        2. The CENTER MUST BE PURE WHITE (#FFFFFF).
-        3. The white center must be a clean rectangle.
-        4. No people, no text, no faces.
-        5. Output a flat image.
+        1. Orientation: PORTRAIT (vertical).
+        2. Aspect ratio: 4:5.
+        3. Canvas size: 1080x1350 pixels.
+        4. Decorative elements ONLY on the borders.
+        5. The center must be clean and empty.
+        6. No people, no faces, no text.
+        7. Use colors and style inspired by the input image.
+        8. The template should look like a real photo frame.
+        9. High quality, professional design.
         """
 
-        # Procesar con Gemini (Imagen + Prompt)
-        result_img = process_with_gemini(prompt, img)
+        #  Gemini dibuja SOBRE el canvas vertical
+        result_img = process_with_gemini(
+            prompt,
+            base_canvas,
+            other_image=img
+        )
+
+        # Blanco → transparencia
         result_img = white_to_transparency(result_img)
+
+        #  Validar orientación
+        if result_img.width > result_img.height:
+            raise ValueError("Generated template is horizontal, expected vertical")
+
+        # 🔒 Tamaño final exacto
+        if result_img.size != (1080, 1350):
+            result_img = result_img.resize(
+                (1080, 1350),
+                Image.Resampling.LANCZOS
+            )
 
         # Subir a S3
         buffer = BytesIO()
@@ -306,7 +329,8 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
             ContentType="image/png",
             ACL="public-read"
         )
-        print(f"✅ Template generated from theme and uploaded to: {s3_key}")
+
+        print(f"✅ Template generated and uploaded: {s3_key}")
 
     except Exception as e:
         print(f"❌ Error generating template in background task: {str(e)}")
@@ -422,17 +446,16 @@ def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
         full_prompt = f"""
         {prompt_text}
         
-       Create a PROFESSIONAL photo frame template.
+       Create a PROFESSIONAL PHOTO FRAME TEMPLATE.
 
-        STRICT RULES:
-        1. Canvas size: 1080x1350 (portrait 4:5).
-        2. The decorative frame MUST be on the borders only.
-        3. The CENTER MUST BE FULLY TRANSPARENT (alpha channel).
-        4. Do NOT place any texture, color, or object in the center.    
-        5. The frame must look like a real printed photo frame.
-        6. No text, no people, no faces.
+STRICT RULES:
+1. Orientation: PORTRAIT (vertical).
+2. Aspect ratio: 4:5.
+3. Canvas size: 1080x1350 pixels.
+4. Decorative elements ONLY on the borders.
+5. The center must be clean and empty.
+6. No people, no faces, no text.
 
-        Output: PNG with transparency.
 
         """
         
