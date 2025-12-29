@@ -273,39 +273,41 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         CANVAS_WIDTH = 1080
         CANVAS_HEIGHT = 1350
 
-        prompt = """
+        prompt = f"""
         You are designing a SOLID PHOTO FRAME TEMPLATE.
 
         MANDATORY RULES:
         1. Orientation: PORTRAIT (vertical).
-        2. Aspect ratio: 4:5.
-        3. Canvas size: 1080x1350 pixels.
-        4. The frame must be a SOLID, CONTINUOUS border.
-        5. No holes, no gaps, no floating decorations.
-        6. The border must be completely opaque.
-        7. The center must be clean (no people, no text).
-        8. The frame must touch all four edges of the canvas.
-        9. No empty margins. No padding.
+        2. Canvas size: 1080x1350 pixels.
+        3. The frame must be SOLID and CONTINUOUS.
+        4. The frame must touch all four edges of the canvas.
+        5. No white margins. No padding.
+
+        GEOMETRY RULES (VERY IMPORTANT):
+        - The decorative frame must be drawn at FULL SCALE.
+        - No small or centered frames.
+        - The frame must extend edge-to-edge.
+
+        COLOR RULES:
+        - Do NOT use plain white as the main frame color.
+        - Ignore white backgrounds in the reference image.
+        - Use saturated colors from the reference image.
 
         STYLE:
-        10. The frame design must be inspired by the reference image.
-        11. Use the dominant colors and theme of the reference image.
-        12. High-quality, realistic, professional frame.
-
-        IMPORTANT COLOR RULES:
-        - Do NOT use plain white or off-white as the main frame color.
-        - The frame must use saturated colors extracted from the main subject of the reference image.
-        - Ignore white or neutral backgrounds in the reference image.
-        - The frame should visually stand out from a white background.
+        - Inspired by the reference image.
+        - Professional, realistic, printed photo frame.
         """
 
-        # 1️⃣ Generar marco sólido
+        #  Generar marco sólido
         result_img = process_with_gemini(
             prompt,
             img
         )
 
-        # 2️⃣ Normalizar tamaño PRIMERO
+        # 2. Forzar que ocupe todo el canvas
+        result_img = ensure_frame_fills_canvas(result_img)
+
+        #  Normalizar tamaño PRIMERO
         result_img = result_img.resize(
             (CANVAS_WIDTH, CANVAS_HEIGHT),
             Image.Resampling.LANCZOS
@@ -331,6 +333,29 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
 
     except Exception as e:
         print(f"❌ Error generating template: {str(e)}")
+
+
+def ensure_frame_fills_canvas(img: Image.Image, min_coverage=0.9) -> Image.Image:
+    img = img.convert("RGBA")
+    w, h = img.size
+    pixels = img.getdata()
+
+    non_white = sum(
+        1 for r, g, b, a in pixels
+        if a > 10 and not (r > 240 and g > 240 and b > 240)
+    )
+
+    coverage = non_white / (w * h)
+
+    # Si el marco ocupa muy poco → escalarlo
+    if coverage < min_coverage:
+        # Crop al área no blanca
+        bbox = img.getbbox()
+        if bbox:
+            cropped = img.crop(bbox)
+            return cropped.resize((w, h), Image.Resampling.LANCZOS)
+
+    return img
 
 
 def white_to_transparency(img: Image.Image, threshold=240) -> Image.Image:
