@@ -291,6 +291,12 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         10. The frame design must be inspired by the reference image.
         11. Use the dominant colors and theme of the reference image.
         12. High-quality, realistic, professional frame.
+
+        IMPORTANT COLOR RULES:
+        - Do NOT use plain white or off-white as the main frame color.
+        - The frame must use saturated colors extracted from the main subject of the reference image.
+        - Ignore white or neutral backgrounds in the reference image.
+        - The frame should visually stand out from a white background.
         """
 
         # 1️⃣ Generar marco sólido
@@ -571,7 +577,8 @@ def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) 
     hole_w = x1 - x0
     hole_h = y1 - y0
 
-    scale = min(hole_w / person.width, hole_h / person.height)
+    # scale = min(hole_w / person.width, hole_h / person.height)
+    scale = max(hole_w / person.width, hole_h / person.height)
     new_w = int(person.width * scale)
     new_h = int(person.height * scale)
 
