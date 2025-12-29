@@ -268,21 +268,13 @@ def get_template_image(folder: str, filename: str):
 
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     try:
-        # Imagen de referencia
         img = load_image_corrected(contents)
 
-        # 🔑 Canvas vertical fijo 4:5
-        BASE_WIDTH = 1080
-        BASE_HEIGHT = 1350
-
-        base_canvas = Image.new(
-            "RGB",
-            (BASE_WIDTH, BASE_HEIGHT),
-            color="white"
-        )
+        CANVAS_WIDTH = 1080
+        CANVAS_HEIGHT = 1350
 
         prompt = """
-       You are designing a SOLID PHOTO FRAME TEMPLATE.
+        You are designing a SOLID PHOTO FRAME TEMPLATE.
 
         MANDATORY RULES:
         1. Orientation: PORTRAIT (vertical).
@@ -291,55 +283,32 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         4. The frame must be a SOLID, CONTINUOUS border.
         5. No holes, no gaps, no floating decorations.
         6. The border must be completely opaque.
-        7. The center must be a SINGLE clean rectangular window for the photo.
-        8. No transparent elements inside the border.
-        9. No people, no faces, no text.
-        10. The frame must touch all four edges of the canvas.
-        11. No empty margins. No padding.
+        7. The center must be clean (no people, no text).
+        8. The frame must touch all four edges of the canvas.
+        9. No empty margins. No padding.
 
-        STYLE RULES:
-        12. The frame design must be inspired by the reference image.
-        13. Use the dominant colors and theme of the reference image.
-        14. The result must look like a real printed photo frame.
-        15. The design must be clean, professional, and structurally solid.
-
-        QUALITY:
-        16. High-quality, realistic, production-ready design.
+        STYLE:
+        10. The frame design must be inspired by the reference image.
+        11. Use the dominant colors and theme of the reference image.
+        12. High-quality, realistic, professional frame.
         """
 
-        #  Gemini dibuja SOBRE el canvas vertical
+        # 1️⃣ Generar marco sólido
         result_img = process_with_gemini(
             prompt,
-            img,
-            other_image=base_canvas
+            img
         )
 
+        # 2️⃣ Normalizar tamaño PRIMERO
+        result_img = result_img.resize(
+            (CANVAS_WIDTH, CANVAS_HEIGHT),
+            Image.Resampling.LANCZOS
+        )
 
-        #result_img = white_to_transparency(result_img)
-
-        #  cerrar huecos internos
-        #result_img = fill_internal_transparency(result_img)
-
-        # limpiar bordes residuales
-        # result_img = trim_empty_margins(result_img)
-
+        # 3️⃣ APLICAR ventana transparente (AQUÍ Y SOLO AQUÍ)
         result_img = apply_fixed_transparent_window(result_img)
 
-        # normalizar tamaño
-        result_img = result_img.resize((1080, 1350), Image.Resampling.LANCZOS)
-
-        #  Validar orientación
-        if result_img.width > result_img.height:
-            raise ValueError("Generated template is horizontal, expected vertical")
-
-        #  Tamaño final exacto
-        if result_img.size != (1080, 1350):
-            result_img = result_img.resize(
-                (1080, 1350),
-                Image.Resampling.LANCZOS
-            )
-
-        # Subir a S3
+        # 4️⃣ Guardar
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -355,7 +324,8 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         print(f"✅ Template generated and uploaded: {s3_key}")
 
     except Exception as e:
-        print(f"❌ Error generating template in background task: {str(e)}")
+        print(f"❌ Error generating template: {str(e)}")
+
 
 def white_to_transparency(img: Image.Image, threshold=240) -> Image.Image:
     img = img.convert("RGBA")
