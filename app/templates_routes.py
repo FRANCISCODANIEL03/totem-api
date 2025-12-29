@@ -412,7 +412,6 @@ def perform_s3_cleanup():
         db.rollback() # Revertir cualquier cambio si la tarea falla a la mitad
     finally:
         db.close() # MUY importante cerrar la sesión de la base de datos
-
 def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
     try:
         CANVAS_WIDTH = 1080
@@ -445,10 +444,20 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
         - Edge-to-edge design.
         """
 
-        # 1️⃣ Generar marco sólido (solo con prompt)
-        result_img = process_with_gemini(full_prompt)
+        # 🔑 BASE IMAGE NEUTRA (OBLIGATORIA)
+        base_image = Image.new(
+            "RGB",
+            (CANVAS_WIDTH, CANVAS_HEIGHT),
+            color=(128, 128, 128)
+        )
 
-        # 2️⃣ Forzar que ocupe todo el canvas
+        # 1️⃣ Generar marco sólido
+        result_img = process_with_gemini(
+            full_prompt,
+            base_image
+        )
+
+        # 2️⃣ Forzar full canvas
         result_img = ensure_frame_fills_canvas(result_img)
 
         # 3️⃣ Normalizar tamaño
@@ -457,7 +466,7 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
             Image.Resampling.LANCZOS
         )
 
-        # 4️⃣ Aplicar ventana transparente fija (MISMA que privadas)
+        # 4️⃣ Aplicar ventana fija (MISMA que privadas)
         result_img = apply_fixed_transparent_window(result_img)
 
         # 5️⃣ Guardar
