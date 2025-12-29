@@ -55,7 +55,7 @@ s3 = boto3.client(
 )
 
 # ==============================
-# 1️⃣ SUBIR TEMPLATE
+#  SUBIR TEMPLATE
 # ==============================
 @router.post("/upload")
 async def upload_template(
@@ -84,7 +84,7 @@ async def upload_template(
 
 
 # ==============================
-# 2️⃣ LISTAR TEMPLATES
+#  LISTAR TEMPLATES
 # ==============================
 @router.get("/my")
 def list_templates(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -134,56 +134,59 @@ def list_public_templates(db: Session = Depends(get_db)):
 
 
 # ==============================
-# 3️⃣ INTEGRAR PERSONA EN TEMPLATE
+#  INTEGRAR PERSONA EN TEMPLATE
 # ==============================
-# @router.post("/integrate/{template_id}")
-# async def integrate_person(
-#     template_id: str,
-#     background_tasks: BackgroundTasks,
-#     file: UploadFile = File(...),
-#     db: Session = Depends(get_db),
-#     current_user=Depends(get_current_user)
-# ):
-#     # Verificar que la plantilla exista
-#     # template = db.query(models.Template).filter_by(id=template_id, user_id=current_user.id).first()
-#     # if not template:
-#     #     raise HTTPException(status_code=404, detail="Template not found")
+@router.post("/integrate/{template_id}")
+async def integrate_person(
+    template_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    # 🔍 Buscar plantilla privada o pública
+    template = db.query(models.Template).filter(
+        models.Template.id == template_id,
+        or_(
+            models.Template.user_id == current_user.id,
+            models.Template.is_public == True
+        )
+    ).first()
 
-#     # Buscar el template si pertenece al usuario O si es público
-#     template = db.query(models.Template).filter(
-#         models.Template.id == template_id,
-#         or_(
-#             models.Template.user_id == current_user.id,
-#             models.Template.is_public == True
-#         )
-#     ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
 
-#     if not template:
-#         raise HTTPException(status_code=404, detail="Template not found or access denied")
-    
-#     # Generar nuevo UUID para la imagen resultante
-#     new_uid = str(uuid.uuid4())
-#     s3_key = f"{current_user.id}/{new_uid}.png"
+    #  NUEVA imagen integrada
+    new_uid = str(uuid.uuid4())
+    s3_key = f"{current_user.id}/{new_uid}.png"
 
-#     # Guardar el registro de TemplateWithImage
-#     template_with_image = models.TemplateWithImage(
-#         id=new_uid,
-#         user_id=current_user.id,
-#         s3_key=s3_key,
-#         template_id=template.id
-#     )
-#     db.add(template_with_image)
-#     db.commit()
-#     db.refresh(template_with_image)
+    # Guardar relación en BD
+    template_with_image = models.TemplateWithImage(
+        id=new_uid,
+        user_id=current_user.id,
+        s3_key=s3_key,
+        template_id=template.id
+    )
+    db.add(template_with_image)
+    db.commit()
+    db.refresh(template_with_image)
 
-#     # Leer el archivo antes de liberar la conexión
-#     contents = await file.read()
+    # Leer foto
+    contents = await file.read()
 
-#     # Lanzar tarea en background
-#     background_tasks.add_task(process_and_integrate_person, template.s3_key, contents, s3_key)
+    #  Integrar usando el S3 KEY REAL del template
+    background_tasks.add_task(
+        process_and_integrate_person,
+        template.s3_key,   #  IMPORTANTE (system/xxx.png o user/xxx.png)
+        contents,
+        s3_key
+    )
 
-#     # Responder rápido
-#     return {"uuid": new_uid, "status": "processing", "user_id": current_user.id}
+    return {
+        "uuid": new_uid,
+        "status": "processing"
+    }
+
 
 @router.post("/admin/generate-public-template")
 async def generate_public_template(
@@ -266,6 +269,56 @@ def get_template_image(folder: str, filename: str):
         headers=headers # Incluye las cabeceras en la respuesta
     )
 
+def process_and_integrate_person(
+    template_s3_key: str,
+    photo_bytes: bytes,
+    output_s3_key: str
+):
+    """
+    Integra una foto del usuario dentro de una plantilla (privada o pública)
+    y guarda la imagen final en S3.
+
+    template_s3_key:  templates/{user_id}/{template_id}.png
+                      ó templates/system/{template_id}.png
+    output_s3_key:    {user_id}/{uuid}.png
+    """
+    try:
+        # 1 Cargar plantilla desde S3
+        frame_obj = s3.get_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=template_s3_key
+        )
+        frame_img = Image.open(frame_obj["Body"]).convert("RGBA")
+
+        # 2 Cargar foto de la persona
+        person_img = load_image_corrected(photo_bytes).convert("RGBA")
+
+        # 3 Integrar foto en el marco (VENTANA FIJA)
+        final_img = integrate_photo_with_frame(
+            frame_img,
+            person_img
+        )
+
+        # 4 Guardar resultado en S3
+        buffer = BytesIO()
+        final_img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        s3.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=output_s3_key,
+            Body=buffer,
+            ContentType="image/png",
+            ACL="public-read"
+        )
+
+        print(f" Image integrated successfully: {output_s3_key}")
+
+    except Exception as e:
+        print(f" Error integrating frame: {str(e)}")
+        raise
+
+
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     try:
         img = load_image_corrected(contents)
@@ -313,10 +366,10 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
             Image.Resampling.LANCZOS
         )
 
-        # 3️⃣ APLICAR ventana transparente (AQUÍ Y SOLO AQUÍ)
+        #  APLICAR ventana transparente (AQUÍ Y SOLO AQUÍ)
         result_img = apply_fixed_transparent_window(result_img)
 
-        # 4️⃣ Guardar
+        #  Guardar
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -329,10 +382,10 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
             ACL="public-read"
         )
 
-        print(f"✅ Template generated and uploaded: {s3_key}")
+        print(f" Template generated and uploaded: {s3_key}")
 
     except Exception as e:
-        print(f"❌ Error generating template: {str(e)}")
+        print(f" Error generating template: {str(e)}")
 
 
 def ensure_frame_fills_canvas(img: Image.Image, min_coverage=0.9) -> Image.Image:
@@ -412,6 +465,7 @@ def perform_s3_cleanup():
         db.rollback() # Revertir cualquier cambio si la tarea falla a la mitad
     finally:
         db.close() # MUY importante cerrar la sesión de la base de datos
+
 def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
     try:
         CANVAS_WIDTH = 1080
