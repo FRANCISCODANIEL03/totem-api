@@ -321,7 +321,9 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         #result_img = fill_internal_transparency(result_img)
 
         # limpiar bordes residuales
-        result_img = trim_empty_margins(result_img)
+        # result_img = trim_empty_margins(result_img)
+
+        result_img = apply_fixed_transparent_window(result_img)
 
         # normalizar tamaño
         result_img = result_img.resize((1080, 1350), Image.Resampling.LANCZOS)
@@ -584,44 +586,65 @@ def load_image_corrected(bytes_data: bytes) -> Image.Image:
     img = Image.open(BytesIO(bytes_data))
     img = ImageOps.exif_transpose(img)
     return img.convert("RGB")
+
 def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) -> Image.Image:
     frame = frame_img.convert("RGBA")
     person = person_img.convert("RGBA")
 
-    W, H = frame.size
+    w, h = frame.size
 
-    # 1️⃣ Detectar área transparente (hueco del marco)
-    alpha = frame.split()[-1]
+    x0 = FRAME_THICKNESS_X
+    y0 = FRAME_THICKNESS_TOP
+    x1 = w - FRAME_THICKNESS_X
+    y1 = h - FRAME_THICKNESS_BOTTOM
 
-    # Invertimos alpha: transparente → blanco
-    mask = ImageOps.invert(alpha)
-
-    bbox = mask.getbbox()
-    if not bbox:
-        raise ValueError("Frame has no transparent area to place the photo")
-
-    x0, y0, x1, y1 = bbox
     hole_w = x1 - x0
     hole_h = y1 - y0
 
-    # 2️⃣ Escalar la foto SOLO al hueco (contain)
     scale = min(hole_w / person.width, hole_h / person.height)
     new_w = int(person.width * scale)
     new_h = int(person.height * scale)
 
     person_resized = person.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    # 3️⃣ Crear canvas final
-    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
-    # Centrar dentro del hueco
     px = x0 + (hole_w - new_w) // 2
     py = y0 + (hole_h - new_h) // 2
 
     canvas.paste(person_resized, (px, py), person_resized)
-
-    # 4️⃣ Pegar el marco encima
     canvas.paste(frame, (0, 0), frame)
 
     return canvas
 
+
+# 🔧 CONFIGURACIÓN GLOBAL (UNA SOLA VEZ)
+CANVAS_WIDTH = 1080
+CANVAS_HEIGHT = 1350
+
+FRAME_THICKNESS_X = 120
+FRAME_THICKNESS_TOP = 160
+FRAME_THICKNESS_BOTTOM = 200
+
+
+def apply_fixed_transparent_window(frame_img: Image.Image) -> Image.Image:
+    frame = frame_img.convert("RGBA")
+    w, h = frame.size
+
+    x0 = FRAME_THICKNESS_X
+    y0 = FRAME_THICKNESS_TOP
+    x1 = w - FRAME_THICKNESS_X
+    y1 = h - FRAME_THICKNESS_BOTTOM
+
+    alpha = Image.new("L", (w, h), 255)
+
+    transparent_area = Image.new(
+        "L",
+        (x1 - x0, y1 - y0),
+        0
+    )
+
+    alpha.paste(transparent_area, (x0, y0))
+    frame.putalpha(alpha)
+
+    return frame
