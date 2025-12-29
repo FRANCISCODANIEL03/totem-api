@@ -291,9 +291,11 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         4. Decorative elements ONLY on the borders.
         5. The center must be clean and empty.
         6. No people, no faces, no text.
-        7. Use colors and style inspired by the input image.
-        8. The template should look like a real photo frame.
-        9. High quality, professional design.
+        7. The template should look like a real photo frame.
+        8. High quality, professional design.
+        9. The frame MUST touch all four edges of the canvas.
+        10. No empty margins. No padding. No white borders.
+        11. The decorative frame must extend fully to the bottom edge.
         """
 
         #  Gemini dibuja SOBRE el canvas vertical
@@ -305,6 +307,16 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
 
         # Blanco → transparencia
         result_img = white_to_transparency(result_img)
+
+        # eliminar márgenes blancos residuales
+        result_img = trim_empty_margins(result_img)
+
+        # 🔒 normalizar tamaño final
+        result_img = result_img.resize(
+            (1080, 1350),
+            Image.Resampling.LANCZOS
+        )
+
 
         #  Validar orientación
         if result_img.width > result_img.height:
@@ -347,6 +359,32 @@ def white_to_transparency(img: Image.Image, threshold=240) -> Image.Image:
             new_data.append(item)
 
     img.putdata(new_data)
+    return img
+
+def trim_empty_margins(img: Image.Image, threshold=240) -> Image.Image:
+    """
+    Recorta márgenes blancos/transparente residuales
+    y devuelve la imagen ajustada.
+    """
+    img = img.convert("RGBA")
+
+    # Crear máscara de píxeles NO blancos
+    datas = img.getdata()
+    mask_data = []
+
+    for r, g, b, a in datas:
+        if a == 0 or (r > threshold and g > threshold and b > threshold):
+            mask_data.append(0)
+        else:
+            mask_data.append(255)
+
+    mask = Image.new("L", img.size)
+    mask.putdata(mask_data)
+
+    bbox = mask.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
     return img
 
      
@@ -515,28 +553,43 @@ def load_image_corrected(bytes_data: bytes) -> Image.Image:
     img = Image.open(BytesIO(bytes_data))
     img = ImageOps.exif_transpose(img)
     return img.convert("RGB")
-
 def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) -> Image.Image:
     frame = frame_img.convert("RGBA")
     person = person_img.convert("RGBA")
 
     W, H = frame.size
 
-    # 🔑 ESCALAR SIN RECORTAR (contain)
-    scale = min(W / person.width, H / person.height)
+    # 1️⃣ Detectar área transparente (hueco del marco)
+    alpha = frame.split()[-1]
+
+    # Invertimos alpha: transparente → blanco
+    mask = ImageOps.invert(alpha)
+
+    bbox = mask.getbbox()
+    if not bbox:
+        raise ValueError("Frame has no transparent area to place the photo")
+
+    x0, y0, x1, y1 = bbox
+    hole_w = x1 - x0
+    hole_h = y1 - y0
+
+    # 2️⃣ Escalar la foto SOLO al hueco (contain)
+    scale = min(hole_w / person.width, hole_h / person.height)
     new_w = int(person.width * scale)
     new_h = int(person.height * scale)
 
     person_resized = person.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    # Fondo transparente
+    # 3️⃣ Crear canvas final
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 
-    # Centrar la foto completa
-    x = (W - new_w) // 2
-    y = (H - new_h) // 2
+    # Centrar dentro del hueco
+    px = x0 + (hole_w - new_w) // 2
+    py = y0 + (hole_h - new_h) // 2
 
-    canvas.paste(person_resized, (x, y), person_resized)
+    canvas.paste(person_resized, (px, py), person_resized)
+
+    # 4️⃣ Pegar el marco encima
     canvas.paste(frame, (0, 0), frame)
 
     return canvas
