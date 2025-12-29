@@ -136,54 +136,54 @@ def list_public_templates(db: Session = Depends(get_db)):
 # ==============================
 # 3️⃣ INTEGRAR PERSONA EN TEMPLATE
 # ==============================
-@router.post("/integrate/{template_id}")
-async def integrate_person(
-    template_id: str,
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    # Verificar que la plantilla exista
-    # template = db.query(models.Template).filter_by(id=template_id, user_id=current_user.id).first()
-    # if not template:
-    #     raise HTTPException(status_code=404, detail="Template not found")
+# @router.post("/integrate/{template_id}")
+# async def integrate_person(
+#     template_id: str,
+#     background_tasks: BackgroundTasks,
+#     file: UploadFile = File(...),
+#     db: Session = Depends(get_db),
+#     current_user=Depends(get_current_user)
+# ):
+#     # Verificar que la plantilla exista
+#     # template = db.query(models.Template).filter_by(id=template_id, user_id=current_user.id).first()
+#     # if not template:
+#     #     raise HTTPException(status_code=404, detail="Template not found")
 
-    # Buscar el template si pertenece al usuario O si es público
-    template = db.query(models.Template).filter(
-        models.Template.id == template_id,
-        or_(
-            models.Template.user_id == current_user.id,
-            models.Template.is_public == True
-        )
-    ).first()
+#     # Buscar el template si pertenece al usuario O si es público
+#     template = db.query(models.Template).filter(
+#         models.Template.id == template_id,
+#         or_(
+#             models.Template.user_id == current_user.id,
+#             models.Template.is_public == True
+#         )
+#     ).first()
 
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found or access denied")
+#     if not template:
+#         raise HTTPException(status_code=404, detail="Template not found or access denied")
     
-    # Generar nuevo UUID para la imagen resultante
-    new_uid = str(uuid.uuid4())
-    s3_key = f"{current_user.id}/{new_uid}.png"
+#     # Generar nuevo UUID para la imagen resultante
+#     new_uid = str(uuid.uuid4())
+#     s3_key = f"{current_user.id}/{new_uid}.png"
 
-    # Guardar el registro de TemplateWithImage
-    template_with_image = models.TemplateWithImage(
-        id=new_uid,
-        user_id=current_user.id,
-        s3_key=s3_key,
-        template_id=template.id
-    )
-    db.add(template_with_image)
-    db.commit()
-    db.refresh(template_with_image)
+#     # Guardar el registro de TemplateWithImage
+#     template_with_image = models.TemplateWithImage(
+#         id=new_uid,
+#         user_id=current_user.id,
+#         s3_key=s3_key,
+#         template_id=template.id
+#     )
+#     db.add(template_with_image)
+#     db.commit()
+#     db.refresh(template_with_image)
 
-    # Leer el archivo antes de liberar la conexión
-    contents = await file.read()
+#     # Leer el archivo antes de liberar la conexión
+#     contents = await file.read()
 
-    # Lanzar tarea en background
-    background_tasks.add_task(process_and_integrate_person, template.s3_key, contents, s3_key)
+#     # Lanzar tarea en background
+#     background_tasks.add_task(process_and_integrate_person, template.s3_key, contents, s3_key)
 
-    # Responder rápido
-    return {"uuid": new_uid, "status": "processing", "user_id": current_user.id}
+#     # Responder rápido
+#     return {"uuid": new_uid, "status": "processing", "user_id": current_user.id}
 
 @router.post("/admin/generate-public-template")
 async def generate_public_template(
@@ -208,7 +208,7 @@ async def generate_public_template(
     db.commit()
 
     # Llamamos a una tarea para generar la imagen con Gemini
-    background_tasks.add_task(generate_and_upload_base_frame, request.prompt, s3_key)
+    background_tasks.add_task(generate_and_upload_public_template, request.prompt, s3_key)
 
     return {"uuid": uid, "status": "generating_public_template"}
 
@@ -358,101 +358,6 @@ def ensure_frame_fills_canvas(img: Image.Image, min_coverage=0.9) -> Image.Image
     return img
 
 
-def white_to_transparency(img: Image.Image, threshold=240) -> Image.Image:
-    img = img.convert("RGBA")
-    datas = img.getdata()
-    new_data = []
-
-    for item in datas:
-        if item[0] > threshold and item[1] > threshold and item[2] > threshold:
-            new_data.append((255, 255, 255, 0))  # transparente
-        else:
-            new_data.append(item)
-
-    img.putdata(new_data)
-    return img
-
-def trim_empty_margins(img: Image.Image, threshold=240) -> Image.Image:
-    """
-    Recorta márgenes blancos/transparente residuales
-    y devuelve la imagen ajustada.
-    """
-    img = img.convert("RGBA")
-
-    # Crear máscara de píxeles NO blancos
-    datas = img.getdata()
-    mask_data = []
-
-    for r, g, b, a in datas:
-        if a == 0 or (r > threshold and g > threshold and b > threshold):
-            mask_data.append(0)
-        else:
-            mask_data.append(255)
-
-    mask = Image.new("L", img.size)
-    mask.putdata(mask_data)
-
-    bbox = mask.getbbox()
-    if bbox:
-        img = img.crop(bbox)
-
-    return img
-
-def fill_internal_transparency(img: Image.Image) -> Image.Image:
-    """
-    Convierte cualquier transparencia interna del marco
-    en sólido, dejando solo el hueco central.
-    """
-    img = img.convert("RGBA")
-    w, h = img.size
-
-    alpha = img.split()[-1]
-
-    # Detectar el hueco principal (el más grande)
-    bbox = ImageOps.invert(alpha).getbbox()
-    if not bbox:
-        return img
-
-    mask = Image.new("L", (w, h), 255)  # todo sólido
-    hole = Image.new("L", (bbox[2]-bbox[0], bbox[3]-bbox[1]), 0)
-
-    mask.paste(hole, (bbox[0], bbox[1]))
-
-    img.putalpha(mask)
-    return img
-
-
-def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
-    try:
-        # Descargar marco
-        frame_buffer = BytesIO()
-        s3.download_fileobj(S3_BUCKET_NAME, template_s3_key, frame_buffer)
-        frame_buffer.seek(0)
-        frame_img = Image.open(frame_buffer)
-
-        # Cargar foto corregida
-        person_img = load_image_corrected(person_bytes)
-
-        # Integrar correctamente (SIN IA)
-        result_img = integrate_photo_with_frame(frame_img, person_img)
-
-        buffer = BytesIO()
-        result_img.save(buffer, format="PNG")
-        buffer.seek(0)
-
-        s3.put_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=output_s3_key,
-            Body=buffer,
-            ContentType="image/png",
-            ACL="public-read"
-        )
-
-        print(f"✅ Integrated image uploaded: {output_s3_key}")
-
-    except Exception as e:
-        print(f"❌ Error integrating frame: {str(e)}")
-
 def perform_s3_cleanup():
     """
     Tarea en segundo plano para encontrar y eliminar registros huérfanos de la BD.
@@ -508,45 +413,54 @@ def perform_s3_cleanup():
     finally:
         db.close() # MUY importante cerrar la sesión de la base de datos
 
-def generate_and_upload_base_frame(prompt_text: str, s3_key: str):
-    """Genera una plantilla en formato RETRATO 4:5."""
+def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
     try:
-        # 1. CAMBIO CLAVE: Lienzo 4:5 (1080x1350)
-        base_canvas = Image.new('RGB', (1080, 1350), color='white')
-        
-        # 2. Prompt ajustado al nuevo ratio
+        CANVAS_WIDTH = 1080
+        CANVAS_HEIGHT = 1350
+
         full_prompt = f"""
-        {prompt_text}
-        
-       Create a PROFESSIONAL PHOTO FRAME TEMPLATE.
+        You are designing a SOLID PHOTO FRAME TEMPLATE.
 
-STRICT RULES:
-1. Orientation: PORTRAIT (vertical).
-2. Aspect ratio: 4:5.
-3. Canvas size: 1080x1350 pixels.
-4. Decorative elements ONLY on the borders.
-5. The center must be clean and empty.
-6. No people, no faces, no text.
+        THEME:
+        {prompt_theme}
 
+        MANDATORY RULES:
+        1. Orientation: PORTRAIT (vertical).
+        2. Canvas size: 1080x1350 pixels.
+        3. The frame must be SOLID and CONTINUOUS.
+        4. The frame must touch all four edges of the canvas.
+        5. No white margins. No padding.
+        6. No holes, no gaps, no floating elements.
+        7. The center must be clean (no people, no text).
 
+        STYLE RULES:
+        - Use strong, saturated colors.
+        - Avoid plain white or empty backgrounds.
+        - The frame should clearly express the theme.
+        - Professional, realistic, printed photo frame.
+
+        GEOMETRY RULES (VERY IMPORTANT):
+        - Draw the frame at FULL SCALE.
+        - No small or centered frames.
+        - Edge-to-edge design.
         """
-        
-        # 3. Generar
-        result_img = process_with_gemini(full_prompt, base_canvas)
 
-        # 4. Lógica de Transparencia 
-        result_img = result_img.convert("RGBA")
-        datas = result_img.getdata()
-        new_data = []
-        threshold = 230 
-        for item in datas:
-            if item[0] > threshold and item[1] > threshold and item[2] > threshold:
-                new_data.append((255, 255, 255, 0)) 
-            else:
-                new_data.append(item)
-        result_img.putdata(new_data)
+        # 1️⃣ Generar marco sólido (solo con prompt)
+        result_img = process_with_gemini(full_prompt)
 
-        # 5. Guardar
+        # 2️⃣ Forzar que ocupe todo el canvas
+        result_img = ensure_frame_fills_canvas(result_img)
+
+        # 3️⃣ Normalizar tamaño
+        result_img = result_img.resize(
+            (CANVAS_WIDTH, CANVAS_HEIGHT),
+            Image.Resampling.LANCZOS
+        )
+
+        # 4️⃣ Aplicar ventana transparente fija (MISMA que privadas)
+        result_img = apply_fixed_transparent_window(result_img)
+
+        # 5️⃣ Guardar
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -558,30 +472,12 @@ STRICT RULES:
             ContentType="image/png",
             ACL="public-read"
         )
-        print(f"✅ Public transparent template created: {s3_key}")
+
+        print(f"✅ Public template created: {s3_key}")
 
     except Exception as e:
         print(f"❌ Error generating public template: {str(e)}")
 
-
-def crop_to_4_5_portrait(img: Image.Image) -> Image.Image:
-    """
-    Recorta la imagen al formato estándar de retrato 4:5 (1080x1350).
-    """
-    
-    # NUEVAS DIMENSIONES OBJETIVO (Ratio 4:5)
-    target_width = 1080
-    target_height = 1350
-
-    # ImageOps.fit redimensiona y recorta al centro para llenar estas dimensiones
-    img_cropped = ImageOps.fit(
-        img, 
-        (target_width, target_height), 
-        method=Image.Resampling.LANCZOS, 
-        centering=(0.5, 0.5)
-    )
-    
-    return img_cropped
 
 def load_image_corrected(bytes_data: bytes) -> Image.Image:
     img = Image.open(BytesIO(bytes_data))
