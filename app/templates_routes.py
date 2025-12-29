@@ -282,28 +282,42 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         )
 
         prompt = """
-        Create a PROFESSIONAL PHOTO FRAME TEMPLATE.
+        You are designing a PROFESSIONAL PHOTO FRAME TEMPLATE.
 
-        STRICT RULES:
+        IMPORTANT:
+        You MUST analyze the provided reference image carefully.
+
+        MANDATORY DESIGN RULES:
         1. Orientation: PORTRAIT (vertical).
         2. Aspect ratio: 4:5.
         3. Canvas size: 1080x1350 pixels.
         4. Decorative elements ONLY on the borders.
-        5. The center must be clean and empty.
+        5. The center must be fully transparent and empty.
         6. No people, no faces, no text.
-        7. The template should look like a real photo frame.
-        8. High quality, professional design.
-        9. The frame MUST touch all four edges of the canvas.
-        10. No empty margins. No padding. No white borders.
-        11. The decorative frame must extend fully to the bottom edge.
+        7. The frame MUST touch all four edges of the canvas.
+        8. No empty margins. No white borders.
+
+        STYLE CONSTRAINTS (VERY IMPORTANT):
+        9. Extract the dominant colors from the reference image and use them as the primary palette.
+        10. Match the visual theme, mood, and material style of the reference image.
+        11. If the reference image is festive, the frame must look festive.
+        12. If the reference image is elegant, the frame must look elegant.
+        13. If the reference image is playful or colorful, the frame must reflect that.
+        14. Do NOT create a generic frame. The frame must feel clearly inspired by the reference image.
+        15. The result should look like a custom-designed frame made specifically for this image.
+
+        QUALITY:
+        16. High-quality, professional, realistic frame design.
+
         """
 
         #  Gemini dibuja SOBRE el canvas vertical
         result_img = process_with_gemini(
             prompt,
-            base_canvas,
-            other_image=img
+            img,
+            other_image=base_canvas
         )
+
 
         # Blanco → transparencia
         result_img = white_to_transparency(result_img)
