@@ -282,33 +282,29 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         )
 
         prompt = """
-        You are designing a PROFESSIONAL PHOTO FRAME TEMPLATE.
+       You are designing a SOLID PHOTO FRAME TEMPLATE.
 
-        IMPORTANT:
-        You MUST analyze the provided reference image carefully.
-
-        MANDATORY DESIGN RULES:
+        MANDATORY RULES:
         1. Orientation: PORTRAIT (vertical).
         2. Aspect ratio: 4:5.
         3. Canvas size: 1080x1350 pixels.
-        4. Decorative elements ONLY on the borders.
-        5. The center must be fully transparent and empty.
-        6. No people, no faces, no text.
-        7. The frame MUST touch all four edges of the canvas.
-        8. No empty margins. No white borders.
+        4. The frame must be a SOLID, CONTINUOUS border.
+        5. No holes, no gaps, no floating decorations.
+        6. The border must be completely opaque.
+        7. The center must be a SINGLE clean rectangular window for the photo.
+        8. No transparent elements inside the border.
+        9. No people, no faces, no text.
+        10. The frame must touch all four edges of the canvas.
+        11. No empty margins. No padding.
 
-        STYLE CONSTRAINTS (VERY IMPORTANT):
-        9. Extract the dominant colors from the reference image and use them as the primary palette.
-        10. Match the visual theme, mood, and material style of the reference image.
-        11. If the reference image is festive, the frame must look festive.
-        12. If the reference image is elegant, the frame must look elegant.
-        13. If the reference image is playful or colorful, the frame must reflect that.
-        14. Do NOT create a generic frame. The frame must feel clearly inspired by the reference image.
-        15. The result should look like a custom-designed frame made specifically for this image.
+        STYLE RULES:
+        12. The frame design must be inspired by the reference image.
+        13. Use the dominant colors and theme of the reference image.
+        14. The result must look like a real printed photo frame.
+        15. The design must be clean, professional, and structurally solid.
 
         QUALITY:
-        16. High-quality, professional, realistic frame design.
-
+        16. High-quality, realistic, production-ready design.
         """
 
         #  Gemini dibuja SOBRE el canvas vertical
@@ -319,18 +315,16 @@ def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
         )
 
 
-        # Blanco → transparencia
         result_img = white_to_transparency(result_img)
 
-        # eliminar márgenes blancos residuales
+        # 🔒 cerrar huecos internos
+        result_img = fill_internal_transparency(result_img)
+
+        # limpiar bordes residuales
         result_img = trim_empty_margins(result_img)
 
-        # 🔒 normalizar tamaño final
-        result_img = result_img.resize(
-            (1080, 1350),
-            Image.Resampling.LANCZOS
-        )
-
+        # normalizar tamaño
+        result_img = result_img.resize((1080, 1350), Image.Resampling.LANCZOS)
 
         #  Validar orientación
         if result_img.width > result_img.height:
@@ -401,7 +395,30 @@ def trim_empty_margins(img: Image.Image, threshold=240) -> Image.Image:
 
     return img
 
-     
+def fill_internal_transparency(img: Image.Image) -> Image.Image:
+    """
+    Convierte cualquier transparencia interna del marco
+    en sólido, dejando solo el hueco central.
+    """
+    img = img.convert("RGBA")
+    w, h = img.size
+
+    alpha = img.split()[-1]
+
+    # Detectar el hueco principal (el más grande)
+    bbox = ImageOps.invert(alpha).getbbox()
+    if not bbox:
+        return img
+
+    mask = Image.new("L", (w, h), 255)  # todo sólido
+    hole = Image.new("L", (bbox[2]-bbox[0], bbox[3]-bbox[1]), 0)
+
+    mask.paste(hole, (bbox[0], bbox[1]))
+
+    img.putalpha(mask)
+    return img
+
+
 def process_and_integrate_person(template_s3_key: str, person_bytes: bytes, output_s3_key: str):
     try:
         # Descargar marco
