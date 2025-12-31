@@ -471,27 +471,24 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
         CANVAS_WIDTH = 1080
         CANVAS_HEIGHT = 1350
 
+        # --- PROMPT DE ALTA CALIDAD (Estilo Cinematográfico) ---
         full_prompt = f"""
-        You are designing a PHOTO FRAME TEMPLATE with a rigid rectangular opening.
-        
+        You are a world-class digital artist creating a premium photo frame template.
+
         THEME:
         {prompt_theme}
 
-        MANDATORY FORMAT RULES:
-        1. Canvas Size: 1080x1350 pixels (Portrait).
-        2. The frame design must be strictly confined to the BORDERS.
-        3. CENTER VOID: The central 70% of the image will be mechanically cut out.
-        
-        CRITICAL COMPOSITION INSTRUCTIONS (To avoid bad cuts):
-        - **DO NOT** let balloons, flowers, or ribbons float into the center of the image.
-        - **KEEP EVERYTHING AT THE EDGES**: All decorative elements must remain within the outer 15% margin of the canvas.
-        - **HARD BOUNDARY**: Imagine a rectangular box in the middle. Do not cross it.
-        - If you draw complex objects (like characters or big balloons), place them fully in the corners, do not let them extend inward.
+        STRUCTURAL REQUIREMENT (Crucial):
+        Create a dense, rich, decorative BORDER that completely surrounds a large, CLEAN, EMPTY RECTANGULAR VOID in the center. The center must be plain white and empty to allow for a photo insertion later.
 
-        STYLE RULES:
-        - Use strong, saturated colors.
-        - Avoid plain white backgrounds.
-        - Professional, realistic, printed photo frame style.
+        QUALITY & STYLE INSTRUCTIONS (To match high-end renders):
+        1.  **VISUAL STYLE:** 3D cinematic render, octane render, highly detailed, lush textures.
+        2.  **LIGHTING:** Dramatic, professional studio lighting. Use rim lights and shadows to create depth and volume in the decorative elements (balloons, flowers, ribbons should pop out).
+        3.  **COMPOSITION:** The border should feel overflowing and abundant, layering elements over each other, but they must gracefully stop at the edge of the central empty rectangle.
+        4.  **PERSPECTIVE:** A slight depth of field, making the frame feel like a real, tangible object.
+        5.  **COLOR:** Rich, vibrant, saturated palette appropriate for the theme. Avoid flat colors.
+
+        Output is a vertical (1080x1350) image of the finished frame with the empty center.
         """
 
         # 🔑 BASE IMAGE NEUTRA (OBLIGATORIA)
