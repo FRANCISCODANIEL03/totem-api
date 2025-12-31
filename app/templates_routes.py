@@ -472,28 +472,26 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
         CANVAS_HEIGHT = 1350
 
         full_prompt = f"""
-        You are designing a SOLID PHOTO FRAME TEMPLATE.
-
+        You are designing a PHOTO FRAME TEMPLATE with a rigid rectangular opening.
+        
         THEME:
         {prompt_theme}
 
-        MANDATORY RULES:
-        1. Orientation: PORTRAIT (vertical).
-        2. Canvas size: 1080x1350 pixels.
-        3. The frame must be SOLID and CONTINUOUS.
-        4. The frame must touch all four edges of the canvas.
+        MANDATORY FORMAT RULES:
+        1. Canvas Size: 1080x1350 pixels (Portrait).
+        2. The frame design must be strictly confined to the BORDERS.
+        3. CENTER VOID: The central 70% of the image will be mechanically cut out.
         
-        CRITICAL COMPOSITION RULES (TO AVOID CROPPING):
-        - Imagine a large rectangular "SAFE ZONE" in the absolute center of the image.
-        - Do NOT draw any elements (ribbons, confetti, flowers, balloons) inside this central safe zone.
-        - All decorative elements must remain strictly within the outer 15% border of the canvas.
-        - Keep the center 100% EMPTY and PLAIN (preferably a solid contrasting color like grey, so it can be easily removed, but do not draw textures there).
+        CRITICAL COMPOSITION INSTRUCTIONS (To avoid bad cuts):
+        - **DO NOT** let balloons, flowers, or ribbons float into the center of the image.
+        - **KEEP EVERYTHING AT THE EDGES**: All decorative elements must remain within the outer 15% margin of the canvas.
+        - **HARD BOUNDARY**: Imagine a rectangular box in the middle. Do not cross it.
+        - If you draw complex objects (like characters or big balloons), place them fully in the corners, do not let them extend inward.
 
         STYLE RULES:
         - Use strong, saturated colors.
-        - Avoid plain white or empty backgrounds.
-        - The frame should clearly express the theme.
-        - Professional, realistic, printed photo frame.
+        - Avoid plain white backgrounds.
+        - Professional, realistic, printed photo frame style.
         """
 
         # 🔑 BASE IMAGE NEUTRA (OBLIGATORIA)
