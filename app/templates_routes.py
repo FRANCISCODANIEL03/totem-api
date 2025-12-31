@@ -482,20 +482,18 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
         2. Canvas size: 1080x1350 pixels.
         3. The frame must be SOLID and CONTINUOUS.
         4. The frame must touch all four edges of the canvas.
-        5. No white margins. No padding.
-        6. No holes, no gaps, no floating elements.
-        7. The center must be clean (no people, no text).
+        
+        CRITICAL COMPOSITION RULES (TO AVOID CROPPING):
+        - Imagine a large rectangular "SAFE ZONE" in the absolute center of the image.
+        - Do NOT draw any elements (ribbons, confetti, flowers, balloons) inside this central safe zone.
+        - All decorative elements must remain strictly within the outer 15% border of the canvas.
+        - Keep the center 100% EMPTY and PLAIN (preferably a solid contrasting color like grey, so it can be easily removed, but do not draw textures there).
 
         STYLE RULES:
         - Use strong, saturated colors.
         - Avoid plain white or empty backgrounds.
         - The frame should clearly express the theme.
         - Professional, realistic, printed photo frame.
-
-        GEOMETRY RULES (VERY IMPORTANT):
-        - Draw the frame at FULL SCALE.
-        - No small or centered frames.
-        - Edge-to-edge design.
         """
 
         # 🔑 BASE IMAGE NEUTRA (OBLIGATORIA)
