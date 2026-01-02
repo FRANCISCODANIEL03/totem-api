@@ -28,7 +28,7 @@ class PromptRequest(BaseModel):
 router = APIRouter(prefix="/templates", tags=["templates"])
 
 # ============================================================
-# 🔧 CONFIGURAR CLIENTE S3 (idéntico al test que sí funcionó)
+#  CONFIGURAR CLIENTE S3 
 # ============================================================
 
 protocol = "https" if S3_USE_SSL else "http"
@@ -113,7 +113,7 @@ def list_templates_with_images(db: Session = Depends(get_db), current_user=Depen
 
 @router.get("/public")
 def list_public_templates(db: Session = Depends(get_db)):
-    """Devuelve todas las plantillas marcadas como públicas (Globales)"""
+    """Devuelve todas las plantillas marcadas como públicas """
     templates = db.query(models.Template).filter(models.Template.is_public == True).all()
     
     result = []
@@ -144,7 +144,7 @@ async def integrate_person(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    # 🔍 Buscar plantilla privada o pública
+    #  Buscar plantilla privada o pública
     template = db.query(models.Template).filter(
         models.Template.id == template_id,
         or_(
@@ -203,7 +203,7 @@ async def generate_public_template(
     # Crear registro en BD como PÚBLICO
     template = models.Template(
         id=uid, 
-        user_id=None, # O usa current_user.id si prefieres que tenga dueño
+        user_id=None, 
         s3_key=s3_key, 
         is_public=True 
     )
@@ -247,7 +247,6 @@ def get_template_image(folder: str, filename: str):
     try:
         s3.download_fileobj(S3_BUCKET_NAME, s3_key, buffer)
     except Exception as e:
-        # Asegúrate de que las respuestas de error también tienen CORS si devuelven JSON
         raise HTTPException(
             status_code=404,
             detail=f"Image not found: {str(e)}",
@@ -491,32 +490,32 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
         Output is a vertical (1080x1350) image of the finished frame with the empty center.
         """
 
-        # 🔑 BASE IMAGE NEUTRA (OBLIGATORIA)
+        # BASE IMAGE NEUTRA (OBLIGATORIA)
         base_image = Image.new(
             "RGB",
             (CANVAS_WIDTH, CANVAS_HEIGHT),
             color=(128, 128, 128)
         )
 
-        # 1️⃣ Generar marco sólido
+        # 1 Generar marco sólido
         result_img = process_with_gemini(
             full_prompt,
             base_image
         )
 
-        # 2️⃣ Forzar full canvas
+        # 2 Forzar full canvas
         result_img = ensure_frame_fills_canvas(result_img)
 
-        # 3️⃣ Normalizar tamaño
+        # 3 Normalizar tamaño
         result_img = result_img.resize(
             (CANVAS_WIDTH, CANVAS_HEIGHT),
             Image.Resampling.LANCZOS
         )
 
-        # 4️⃣ Aplicar ventana fija (MISMA que privadas)
+        # 4 Aplicar ventana fija (MISMA que privadas)
         result_img = apply_fixed_transparent_window(result_img)
 
-        # 5️⃣ Guardar
+        # 5 Guardar
         buffer = BytesIO()
         result_img.save(buffer, format="PNG")
         buffer.seek(0)
@@ -529,10 +528,10 @@ def generate_and_upload_public_template(prompt_theme: str, s3_key: str):
             ACL="public-read"
         )
 
-        print(f"✅ Public template created: {s3_key}")
+        print(f"Public template created: {s3_key}")
 
     except Exception as e:
-        print(f"❌ Error generating public template: {str(e)}")
+        print(f"Error generating public template: {str(e)}")
 
 
 def load_image_corrected(bytes_data: bytes) -> Image.Image:
@@ -572,7 +571,7 @@ def integrate_photo_with_frame(frame_img: Image.Image, person_img: Image.Image) 
     return canvas
 
 
-# 🔧 CONFIGURACIÓN GLOBAL (UNA SOLA VEZ)
+#  CONFIGURACIÓN GLOBAL
 CANVAS_WIDTH = 1080
 CANVAS_HEIGHT = 1350
 

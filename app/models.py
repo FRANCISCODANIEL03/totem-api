@@ -38,7 +38,7 @@ class TemplateWithImage(Base):
     s3_key = Column(String, nullable=False)
     user_id = Column(String, ForeignKey("users.id"))
 
-    # 🔑 Nueva relación hacia Template
+    # Nueva relación hacia Template
     template_id = Column(String, ForeignKey("templates.id"), nullable=False)
 
     user = relationship("User")
