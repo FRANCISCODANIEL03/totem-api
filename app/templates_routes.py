@@ -317,6 +317,68 @@ def process_and_integrate_person(
         print(f" Error integrating frame: {str(e)}")
         raise
 
+# ==============================
+#  ELIMINAR IMAGEN INTEGRADA (Foto final)
+# ==============================
+@router.delete("/image/{image_uuid}")
+def delete_integrated_image(
+    image_uuid: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    # 1. Buscar la imagen
+    image = db.query(models.TemplateWithImage).filter(
+        models.TemplateWithImage.id == image_uuid,
+        models.TemplateWithImage.user_id == current_user.id
+    ).first()
+
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # 2. Borrar de S3
+    try:
+        s3.delete_object(Bucket=S3_BUCKET_NAME, Key=image.s3_key)
+    except Exception as e:
+        print(f"Error deleting from S3: {e}") 
+        # Continuamos para borrar de la BD aunque falle S3
+
+    # 3. Borrar de BD
+    db.delete(image)
+    db.commit()
+
+    return {"status": "success", "uuid": image_uuid}
+
+
+# ==============================
+#  ELIMINAR PLANTILLA PRIVADA
+# ==============================
+@router.delete("/my/{template_uuid}")
+def delete_my_template(
+    template_uuid: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    # 1. Buscar la plantilla (Solo las del usuario, no públicas)
+    template = db.query(models.Template).filter(
+        models.Template.id == template_uuid,
+        models.Template.user_id == current_user.id
+    ).first()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found or system protected")
+
+    # 2. Borrar de S3
+    try:
+        s3.delete_object(Bucket=S3_BUCKET_NAME, Key=template.s3_key)
+    except Exception as e:
+        print(f"Error deleting from S3: {e}")
+
+    # 3. Borrar de BD
+    db.delete(template)
+    db.commit()
+
+    return {"status": "success", "uuid": template_uuid}
+
 
 def process_and_upload_template(contents: bytes, s3_key: str, user_id: str):
     try:
